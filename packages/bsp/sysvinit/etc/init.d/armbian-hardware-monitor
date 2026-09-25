@@ -1,0 +1,37 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          armbian-hardware-monitor
+# Required-Start:    $local_fs
+# Required-Stop:
+# Default-Start:     S
+# Default-Stop:
+# Short-Description: Armbian hardware monitoring
+### END INIT INFO
+#
+# sysvinit (Devuan / Pivuan) counterpart of armbian-hardware-monitor.service: runs /usr/lib/armbian/armbian-hardware-monitor.
+# Shipped in the BSP only when the image is built with INIT_SYSTEM=sysvinit.
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PROG=/usr/lib/armbian/armbian-hardware-monitor
+
+[ -x "${PROG}" ] || exit 0
+
+# shellcheck source=/dev/null
+. /lib/lsb/init-functions
+
+case "$1" in
+	start)
+		log_action_begin_msg "Armbian hardware monitoring"
+		"${PROG}" start
+		log_action_end_msg $?
+		;;
+	stop | restart | force-reload)
+		# Nothing to undo: this only runs once at boot.
+		;;
+	*)
+		echo "Usage: $0 {start}" >&2
+		exit 3
+		;;
+esac
+
+exit 0

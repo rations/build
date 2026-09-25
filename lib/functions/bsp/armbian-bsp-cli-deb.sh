@@ -127,6 +127,12 @@ function compile_armbian-bsp-cli() {
 	run_host_command_logged rsync -av "${SRC}"/packages/bsp/common/* "${destination}"
 	wait_for_disk_sync "after rsync'ing package/bsp/common for bsp-cli"
 
+	# sysvinit (Devuan) images: LSB init scripts for the Armbian services, in place of the systemd units above.
+	if [[ "${INIT_SYSTEM}" == "sysvinit" ]]; then
+		display_alert "Copying sysvinit bsp files" "packages/bsp/sysvinit" "info"
+		run_host_command_logged rsync -av "${SRC}"/packages/bsp/sysvinit/* "${destination}"
+	fi
+
 	# Optional: park SATA/HDD heads on shutdown. Opt-in per board or family with
 	# HDD_PARK_ON_SHUTDOWN="yes". The generic script syncs, waits for any mdadm
 	# array to go clean, then spins down (hdparm -y) and detaches every
@@ -438,9 +444,16 @@ function board_side_bsp_cli_preinst() {
 
 function board_side_bsp_cli_postrm() { # not run here
 	if [[ remove == "$1" ]] || [[ abort-install == "$1" ]]; then
-		systemctl disable armbian-hardware-monitor.service armbian-hardware-optimize.service > /dev/null 2>&1
-		systemctl disable armbian-zram-config.service armbian-ramlog.service > /dev/null 2>&1
-		systemctl disable armbian-live-patch.service > /dev/null 2>&1
+		if command -v systemctl > /dev/null 2>&1; then
+			systemctl disable armbian-hardware-monitor.service armbian-hardware-optimize.service > /dev/null 2>&1
+			systemctl disable armbian-zram-config.service armbian-ramlog.service > /dev/null 2>&1
+			systemctl disable armbian-live-patch.service > /dev/null 2>&1
+		else
+			# sysvinit (Devuan): drop the rc.d links of the init scripts shipped in packages/bsp/sysvinit
+			for service in armbian-hardware-monitor armbian-hardware-optimize armbian-zram-config armbian-ramlog armbian-led-state armbian-firstrun armbian-resize-filesystem; do
+				update-rc.d -f "${service}" remove > /dev/null 2>&1
+			done
+		fi
 	fi
 }
 
@@ -485,7 +498,14 @@ function board_side_bsp_cli_postinst_finish() {
 	fi
 
 	# Reload services
-	systemctl --no-reload enable armbian-hardware-monitor.service armbian-hardware-optimize.service armbian-zram-config.service armbian-led-state.service > /dev/null 2>&1
+	if command -v systemctl > /dev/null 2>&1; then
+		systemctl --no-reload enable armbian-hardware-monitor.service armbian-hardware-optimize.service armbian-zram-config.service armbian-led-state.service > /dev/null 2>&1
+	else
+		# sysvinit (Devuan): "defaults" only adds links that are missing, so services disabled by the user stay disabled
+		for service in armbian-hardware-monitor armbian-hardware-optimize armbian-zram-config armbian-led-state; do
+			[[ -x "/etc/init.d/${service}" ]] && update-rc.d "${service}" defaults > /dev/null 2>&1
+		done
+	fi
 }
 
 # Helper to add files, from stdin, to the bsp-cli package.

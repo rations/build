@@ -1,0 +1,46 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          armbian-firstrun
+# Required-Start:    $local_fs $remote_fs $syslog
+# Required-Stop:
+# Should-Start:      ssh
+# Default-Start:     2 3 4 5
+# Default-Stop:
+# Short-Description: Armbian first run tasks
+### END INIT INFO
+#
+# sysvinit (Devuan / Pivuan) counterpart of armbian-firstrun.service: runs /usr/lib/armbian/armbian-firstrun.
+# Shipped in the BSP only when the image is built with INIT_SYSTEM=sysvinit.
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PROG=/usr/lib/armbian/armbian-firstrun
+
+[ -x "${PROG}" ] || exit 0
+
+# shellcheck source=/dev/null
+. /lib/lsb/init-functions
+
+# Same variables the systemd unit passes with EnvironmentFile=.
+if [ -f /etc/default/armbian-firstrun ]; then
+	set -a
+	# shellcheck source=/dev/null
+	. /etc/default/armbian-firstrun
+	set +a
+fi
+
+case "$1" in
+	start)
+		log_action_begin_msg "Armbian first run tasks"
+		"${PROG}" start
+		log_action_end_msg $?
+		;;
+	stop | restart | force-reload)
+		# Nothing to undo: this only runs once at boot.
+		;;
+	*)
+		echo "Usage: $0 {start}" >&2
+		exit 3
+		;;
+esac
+
+exit 0

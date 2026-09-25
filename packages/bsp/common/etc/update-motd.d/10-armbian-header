@@ -109,8 +109,11 @@ if [[ "${VERSION:-}" == *trunk* ]]; then
 	VERSION="${VERSION} rolling"
 fi
 
-printf ' \e[0;92mv%s\x1B[0m for %s running Armbian Linux \e[0;92m%s\x1B[0m\n' \
-	"${VERSION}" "${BOARD_NAME}" "${KERNELID}"
+# Derived images (e.g. Pivuan) show their own name instead of "Armbian"
+OS_NAME="Armbian"
+[[ -n "${VENDOR:-}" && "${VENDOR}" != Armbian* ]] && OS_NAME="${VENDOR}"
+printf ' \e[0;92mv%s\x1B[0m for %s running %s Linux \e[0;92m%s\x1B[0m\n' \
+	"${VERSION}" "${BOARD_NAME}" "${OS_NAME}" "${KERNELID}"
 
 # --- Hardware support status ---
 HARDWARE_STATUS=""

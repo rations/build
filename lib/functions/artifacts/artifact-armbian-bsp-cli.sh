@@ -61,6 +61,11 @@ function artifact_armbian-bsp-cli_prepare_version() {
 		"KERNEL_IMAGE_TYPE: ${KERNEL_IMAGE_TYPE}"                     # /etc/armbian-release
 		"VENDOR: ${VENDOR}"                                           # /etc/armbian-release
 		"VENDORCOLOR: ${VENDORCOLOR}"                                 # /etc/armbian-release
+		"VENDORURL: ${VENDORURL}"                                     # /etc/armbian-release
+		"VENDORDOCS: ${VENDORDOCS}"                                   # /etc/armbian-release
+		"VENDORSUPPORT: ${VENDORSUPPORT}"                             # /etc/armbian-release
+		"VENDORBUGS: ${VENDORBUGS}"                                   # /etc/armbian-release
+		"INIT_SYSTEM: ${INIT_SYSTEM}"                                 # packages/bsp/sysvinit, maintainer scripts
 		"OVERLAY_DIR: ${OVERLAY_DIR}"                                 # /etc/armbian-release
 		"KERNEL_TARGET: ${KERNEL_TARGET}"                             # /etc/armbian-release
 		"KERNEL_TEST_TARGET: ${KERNEL_TEST_TARGET}"                   # /etc/armbian-release
@@ -73,7 +78,8 @@ function artifact_armbian-bsp-cli_prepare_version() {
 	declare var_config_hash_short="${vars_config_hash:0:${short_hash_size}}"
 
 	declare -a dirs_to_hash=(
-		"${SRC}/packages/bsp/common" # common stuff
+		"${SRC}/packages/bsp/common"   # common stuff
+		"${SRC}/packages/bsp/sysvinit" # sysvinit (Devuan) init scripts; only copied when INIT_SYSTEM=sysvinit
 		"${SRC}/packages/bsp/${BOARD}" # board-specific stuff
 		"${SRC}/config/optional/_any_board/_packages/bsp-cli"
 		"${SRC}/config/optional/architectures/${ARCH}/_packages/bsp-cli"

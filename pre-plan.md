@@ -272,7 +272,7 @@ Put Devuan-only logic in `extensions/devuan.sh` wherever a hook can reach it. Ma
 - Optional: flash a community Devuan Pi 5 image from `arm-files.devuan.org` and see what it does differently (boot partition, inittab, firmware packages).
 - **Done when:** a Devuan arm64 rootfs tarball exists without `/lib/systemd/systemd`, and the package-availability list is recorded.
 
-### Phase 1: Devuan distribution in `build` (code written, not yet built; see §10)
+### Phase 1: Devuan distribution in `build` (done: built in CI and booted on a Pi 5; see §10)
 - Add `config/distributions/excalibur/` and `config/cli/excalibur/{debootstrap,main}/`.
 - Edit `main-config.sh` and `distro-specific.sh` (keyring and sources). Skip the Armbian base-files artifact on Devuan.
 - Guard `rootfs-create.sh` (`systemd-firstboot` mask). Add `enable_service_sdcard` / `service_exists_sdcard` and use them for the Armbian services in `distro-agnostic.sh`.
@@ -281,7 +281,7 @@ Put Devuan-only logic in `extensions/devuan.sh` wherever a hook can reach it. Ma
 - Add `excalibur` to `host-release.sh:32`.
 - **Done when:** `./compile.sh build BOARD=rpi4b BRANCH=current RELEASE=excalibur BUILD_MINIMAL=yes BUILD_DESKTOP=no KERNEL_CONFIGURE=no EXPERT=yes` produces an image, and `dpkg -l | grep -i systemd` in the image shows no `systemd` or `systemd-sysv`. (`SKIP_ARMBIAN_REPO=yes` and `KEEP_ORIGINAL_OS_RELEASE=yes` are now set automatically for Devuan releases.)
 
-### Phase 2: BSP, first boot, and Pi specifics
+### Phase 2: BSP, first boot, and Pi specifics (code written, not yet booted; see §12)
 - Add `/etc/init.d/armbian-*` scripts and `unblock-rfkill`, and make the BSP postinst init-aware.
 - Patch `armbian-firstrun`, `armbian-resize-filesystem`, `armbian-ramlog`, `armbian-zram-config`, `armbian-truncate-logs` and `armbian-common`.
 - Patch `armbian-firstlogin`: ssh restart, timezone, network, DM.
@@ -358,7 +358,7 @@ sudo apt install devuan-keyring      # also added to host dependencies automatic
   BUILD_MINIMAL=yes BUILD_DESKTOP=no KERNEL_CONFIGURE=no EXPERT=yes
 ```
 
-`EXPERT=yes` is needed because `config/distributions/excalibur/support` is `csc`. On a non-Devuan host, set `DEVUAN_KEYRING_FILE=/path/to/devuan-archive-keyring.gpg`.
+`EXPERT=yes` was needed while `config/distributions/excalibur/support` was `csc`; Phase 2 sets it to `supported` (the motd then shows the packages as "stable" instead of "rolling"). `EXPERT=yes` is harmless and still passed by the workflow. On a non-Devuan host, set `DEVUAN_KEYRING_FILE=/path/to/devuan-archive-keyring.gpg`.
 
 **What changed**
 
@@ -409,4 +409,43 @@ sudo apt install devuan-keyring      # also added to host dependencies automatic
 - **Outputs:** the `.img.xz` and `.sha` (kept 14 days) and `output/logs` are uploaded as run artifacts.
 - **Removed workflows:** Armbian's 29 upstream workflows are deleted in this fork (see `.github/workflows/README.md`).
 
-**Unknowns until the first run:** free disk on the arm64 runner after cleanup, and total build time with an empty cache.
+**First run (run 36133540430):** success in about 4 minutes. The kernel package (`6.18.53`) was not compiled: it was downloaded prebuilt from Armbian's package cache (`ghcr.io/armbian/os`), since its hash is unchanged by this fork. The Devuan rootfs took 45 s with mmdebstrap. Output: a 1.7 GB image, 199 MB as `.img.xz`. Archive signers seen: `72E3CB773315DFA2E464743D94532124541922FB` (pkgmaster.devuan.org/devuan) and `9F8D6C74DE661075FD171BE3B3982868D104092C` (deb.devuan.org/merged).
+
+The artifact is a `.zip` holding a plain `.img.xz` (xz-compressed disk image, **not** a tar archive): unpack with `unzip`, then flash the `.img.xz` directly or decompress it with `xz -dk`. `tar -xf` complains because there is no tar archive inside.
+
+---
+
+## 12. Phase 2 implementation status
+
+**Phase 1 boot test on a Pi 5 (reported by the user):** `/proc/1/comm` is `init`; `dpkg -l` shows sysvinit and no systemd; Ethernet up with a DHCP address; root filesystem not resized (1.1 GB, about 850 MB used); `INIT: Id "S0" respawning too fast` on the console (`/dev/serial0` missing). Found while reviewing: on sysvinit the console **root autologin was never removed** after first login (firstlogin only deleted the systemd getty overrides). On a Phase 1 image, fix it by hand: `sed -i 's/ --noissue --autologin root//' /etc/inittab && telinit q`.
+
+Written in this fork and checked offline (`sh -n`/`bash -n`, shellcheck with no new findings, shfmt, the init scripts run against a stub program, the `armbian-common` helpers run on both code paths). **Not built or booted yet.**
+
+| File | Change |
+|---|---|
+| `packages/bsp/sysvinit/etc/init.d/armbian-{zram-config,ramlog,hardware-monitor,hardware-optimize,led-state,resize-filesystem,firstrun}` (new) | LSB init scripts wrapping the existing `/usr/lib/armbian` programs. zram, ramlog, hardware and LED scripts run in `rcS`; resize and firstrun in runlevels 2-5 (firstrun after `ssh`, and with `/etc/default/armbian-firstrun` loaded like the unit's `EnvironmentFile=`). ramlog and led-state also stop in 0/6 to save logs and LED state |
+| `lib/functions/bsp/armbian-bsp-cli-deb.sh` | Copies `packages/bsp/sysvinit` into the BSP when `INIT_SYSTEM=sysvinit`. postinst/postrm use `update-rc.d` when `systemctl` is absent |
+| `lib/functions/artifacts/artifact-armbian-bsp-cli.sh` | BSP version hash includes `packages/bsp/sysvinit`, `INIT_SYSTEM` and the `VENDOR*` links written to `/etc/armbian-release` |
+| `packages/bsp/common/usr/lib/armbian/armbian-common` | Helpers `armbian_is_systemd` (`/run/systemd/system`), `armbian_service_disable`, `armbian_service_restart`, `armbian_set_hostname`, `armbian_set_timezone` |
+| `armbian-firstrun`, `armbian-resize-filesystem` | Disable themselves and set the Pi hostname through the helpers, so they run once on sysvinit too. First boot now regenerates the SSH host keys |
+| `armbian-firstlogin` | Timezone and ssh restart through the helpers (it no longer aborts at `systemctl restart ssh.service`). No systemd boot wait, `daemon-reload`, wait-online or web-config checks on sysvinit. Removes `--noissue --autologin root` from `/etc/inittab` and runs `telinit q`. Wi-Fi setup writes `/etc/network/interfaces.d/<wlan>` (mode 600, `wpa-ssid`/`wpa-psk`) and runs `ifup` when netplan is absent. New users also join `gpio i2c spi`. Derived images show "Welcome to the Pivuan setup wizard!" and the project URL, without Armbian's documentation/community links or support-status lines |
+| `armbian-ramlog`, `armbian-truncate-logs` | journald/`journalctl` steps only when `journalctl` exists |
+| `packages/bsp/common/etc/update-motd.d/10-armbian-header` | "running Pivuan Linux" instead of "running Armbian Linux" for derived images |
+| `lib/functions/configuration/main-config.sh` | Devuan images default `VENDORURL`, `VENDORDOCS`, `VENDORSUPPORT` to `https://github.com/rations/build` and `VENDORBUGS` to its issues page |
+| `config/sources/families/bcm2711.conf` | New `post_family_tweaks_bsp__rpi_sys_mods_files` (Devuan only): the §5.3 allow-list from `RPi-Distro/raspberrypi-sys-mods` at `7959bb7a` (12 udev rule files, `i2cprobe`, initramfs hook `rpi-sys-mods`, `init-top/rpi_wd`), plus a postinst that creates the `gpio`, `i2c`, `spi` groups. The image's `update_initramfs` step runs after the BSP is installed, so the initramfs picks up the hook |
+| `lib/functions/rootfs/distro-agnostic.sh` | sysvinit serial getty line becomes `/bin/sh -c '[ -e /dev/<tty> ]\|\|exec sleep 1d;exec /sbin/getty …'` (only when it fits init's 127-character limit), so a missing device no longer makes init respawn getty in a loop |
+| `config/distributions/excalibur/support` | `csc` → `supported` |
+
+**Check on the Pi 5 after the next build:**
+
+```sh
+df -h /                                   # grown to the card size (maybe after one automatic reboot)
+ls /etc/rcS.d /etc/rc2.d | grep armbian   # the Armbian scripts are linked
+ls -l /dev/serial0 /dev/gpiochip4         # both symlinks exist; no "S0 respawning" messages
+id <new user>                             # includes gpio i2c spi
+gpioinfo | head                           # works without sudo as the new user
+zramctl; findmnt /var/log                 # zram swap, /var/log on zram
+grep autologin /etc/inittab               # nothing, after first login
+rfkill list                               # Wi-Fi/Bluetooth not soft-blocked
+```
+

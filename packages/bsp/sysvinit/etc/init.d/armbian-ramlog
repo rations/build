@@ -1,0 +1,45 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          armbian-ramlog
+# Required-Start:    $local_fs armbian-zram-config
+# Required-Stop:     $local_fs
+# X-Start-Before:    rsyslog
+# X-Stop-After:      rsyslog
+# Default-Start:     S
+# Default-Stop:      0 6
+# Short-Description: Armbian memory supported logging
+### END INIT INFO
+#
+# sysvinit (Devuan / Pivuan) counterpart of armbian-ramlog.service: runs /usr/lib/armbian/armbian-ramlog.
+# Shipped in the BSP only when the image is built with INIT_SYSTEM=sysvinit.
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PROG=/usr/lib/armbian/armbian-ramlog
+
+[ -x "${PROG}" ] || exit 0
+
+# shellcheck source=/dev/null
+. /lib/lsb/init-functions
+
+case "$1" in
+	start)
+		log_action_begin_msg "Armbian memory supported logging"
+		"${PROG}" start
+		log_action_end_msg $?
+		;;
+	stop)
+		log_action_begin_msg "Armbian memory supported logging (stop)"
+		"${PROG}" stop
+		log_action_end_msg $?
+		;;
+	restart | force-reload)
+		"$0" stop
+		"$0" start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|force-reload}" >&2
+		exit 3
+		;;
+esac
+
+exit 0

@@ -16,7 +16,8 @@ JOURNAL_SIZE=5M # size to shrink systemd-journal
 
 [ "$ENABLED" != true ] && exit 0
 
-if [ -z "`grep ^Storage=volatile /etc/systemd/journald.conf`" -a -z "$(ls -A /run/log/journal)" ] ;then
+# no journald on sysvinit (Devuan) images
+if command -v journalctl > /dev/null 2>&1 && [ -z "`grep ^Storage=volatile /etc/systemd/journald.conf 2> /dev/null`" -a -z "$(ls -A /run/log/journal 2> /dev/null)" ] ;then
     journalctl --relinquish-var # make sure to do volatile logging until the next flush
 fi
 
@@ -35,7 +36,7 @@ if [ $logusage -ge $treshold ]; then
     # remove
     /usr/bin/find /var/log -name '*.[0-9]' -or -name '*.gz' | xargs -r rm -f
     # vacuum systemd-journald
-    [ -d /var/log/journal ] && journalctl --quiet --vacuum-size=${JOURNAL_SIZE}
+    [ -d /var/log/journal ] && command -v journalctl > /dev/null 2>&1 && journalctl --quiet --vacuum-size=${JOURNAL_SIZE}
     # remove old archived journal files modified more than 1 day ago
     [ -d /var/log.hdd/journal ] && find /var/log.hdd/journal -ctime 1 \( -name '*@*' -o -name '*~' \)  -delete
 fi

@@ -257,7 +257,7 @@ main()
 
 	# skip resizing if explicitly disabled
 	if [[ -f /root/.no_rootfs_resize ]]; then
-		systemctl disable armbian-resize-filesystem
+		armbian_service_disable armbian-resize-filesystem
 		exit 0
 	fi
 
@@ -297,7 +297,7 @@ main()
 	do_expand_filesystem "$rootdev" "/"
 
 	# disable itself
-	[[ ! -f /var/run/resize2fs-reboot ]] && systemctl disable armbian-resize-filesystem
+	[[ ! -f /var/run/resize2fs-reboot ]] && armbian_service_disable armbian-resize-filesystem
 	exit 0
 }
 

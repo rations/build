@@ -530,8 +530,13 @@ function install_distribution_agnostic() {
 			serial_inittab_index+=1
 			declare getty_opts="-L"
 			[[ $CONSOLE_AUTOLOGIN == yes ]] && getty_opts="-L --noissue --autologin root"
+			# If the device node is missing (e.g. no udev symlink for serial0), sleep instead of letting init
+			# respawn getty in a loop ("respawning too fast"). init limits the process field to 127 characters.
+			declare getty_cmd="/sbin/getty ${getty_opts} ${array[0]} ${array[1]:-115200} vt100"
+			declare getty_guarded="/bin/sh -c '[ -e /dev/${array[0]} ]||exec sleep 1d;exec ${getty_cmd}'"
+			[[ ${#getty_guarded} -le 127 ]] && getty_cmd="${getty_guarded}"
 			sed -i "/^${inittab_id}:/d" "${SDCARD}"/etc/inittab
-			echo "${inittab_id}:2345:respawn:/sbin/getty ${getty_opts} ${array[0]} ${array[1]:-115200} vt100" >> "${SDCARD}"/etc/inittab
+			echo "${inittab_id}:2345:respawn:${getty_cmd}" >> "${SDCARD}"/etc/inittab
 			continue
 		fi
 		if [[ ${array[1]} != "115200" && -n ${array[1]} ]]; then

@@ -139,13 +139,13 @@ case "$1" in
 		# Update /etc/hosts to reflect the new hostname
 		sed -i "s/$(hostname)/$NEW_HOSTNAME/g" /etc/hosts
 		# Change the hostname
-		hostnamectl set-hostname "$NEW_HOSTNAME"
+		armbian_set_hostname "$NEW_HOSTNAME"
 	fi
 
 	# Remove KDE Neon base files upgrade pin
 	[[ -f /etc/apt/preferences.d/99-neon-base-files ]] && rm -f /etc/apt/preferences.d/99-neon-base-files
 
-	systemctl disable armbian-firstrun
+	armbian_service_disable armbian-firstrun
 	exit 0
 	;;
 

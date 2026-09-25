@@ -12,6 +12,11 @@
 # show_motd_warning
 # generate_random_mac
 # set_fixed_mac
+# armbian_is_systemd
+# armbian_service_disable
+# armbian_service_restart
+# armbian_set_hostname
+# armbian_set_timezone
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 my_name="${0##*/}"
@@ -47,6 +52,51 @@ atomic_write() {
 	# rename itself durable across power loss.
 	sync -f "${dest}" 2>/dev/null || sync || return
 	sync -f "$(dirname "${dest}")" 2>/dev/null || sync
+}
+
+# Init system helpers: the same scripts run on systemd (Armbian) and sysvinit (Devuan / Pivuan) images.
+# True when booted with systemd as PID 1 (the check sd_booted() uses).
+armbian_is_systemd() {
+	[[ -d /run/systemd/system ]]
+}
+
+# Stop a service from starting at boot: armbian_service_disable <name>
+armbian_service_disable() {
+	if armbian_is_systemd; then
+		systemctl disable "$1"
+	elif [[ -x "/etc/init.d/$1" ]]; then
+		update-rc.d "$1" disable
+	fi
+}
+
+# Restart a running service: armbian_service_restart <name>
+armbian_service_restart() {
+	if armbian_is_systemd; then
+		systemctl restart "$1.service"
+	else
+		service "$1" restart
+	fi
+}
+
+# Set the system hostname (the caller updates /etc/hosts): armbian_set_hostname <name>
+armbian_set_hostname() {
+	if armbian_is_systemd; then
+		hostnamectl set-hostname "$1"
+	else
+		echo "$1" > /etc/hostname
+		hostname "$1"
+	fi
+}
+
+# Set the system timezone: armbian_set_timezone <Area/City>
+armbian_set_timezone() {
+	if armbian_is_systemd; then
+		timedatectl set-timezone "$1"
+	else
+		[[ -f "/usr/share/zoneinfo/$1" ]] || return 1
+		ln -sf "/usr/share/zoneinfo/$1" /etc/localtime
+		echo "$1" > /etc/timezone
+	fi
 }
 
 # Generate a random MAC address

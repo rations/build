@@ -72,6 +72,15 @@ function do_main_configuration() {
 		unset VENDORSUPPORT,VENDORPRIVACY,VENDORBUGS,VENDORLOGO,ROOTPWD,MAINTAINER,MAINTAINERMAIL
 	fi
 
+	# Pivuan (Devuan) images point their links at this fork rather than at Armbian's docs, forum and bug tracker.
+	if is_devuan_release "${RELEASE}"; then
+		declare pivuan_url="https://github.com/rations/build"
+		[[ -z $VENDORURL ]] && VENDORURL="${pivuan_url}"
+		[[ -z $VENDORSUPPORT ]] && VENDORSUPPORT="${pivuan_url}"
+		[[ -z $VENDORBUGS ]] && VENDORBUGS="${pivuan_url}/issues"
+		[[ -z $VENDORDOCS ]] && VENDORDOCS="${pivuan_url}"
+	fi
+
 	[[ -z $VENDORCOLOR ]] && VENDORCOLOR="247;16;0" # RGB values for MOTD logo
 	[[ -z $VENDORURL ]] && VENDORURL="https://duckduckgo.com/"
 	[[ -z $VENDORSUPPORT ]] && VENDORSUPPORT="https://community.armbian.com/"
