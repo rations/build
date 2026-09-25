@@ -57,7 +57,9 @@ jobs:
       BUILD_MINIMAL: ${{ inputs.build_minimal && 'yes' || 'no' }}
       DEVUAN_KEY_FINGERPRINTS: ${{ vars.DEVUAN_KEY_FINGERPRINTS }}
       # Devuan-only repository (holds devuan-keyring) and the merged archive the image is built from.
-      DEVUAN_POOL_BASE: https://pkgmaster.devuan.org/devuan
+      # Devuan serves these over plain http, like apt: integrity comes from the SHA256 in the Packages
+      # index, the InRelease signatures, and (once set) the pinned fingerprints, not from the transport.
+      DEVUAN_POOL_BASE: http://pkgmaster.devuan.org/devuan
       DEVUAN_MERGED_BASE: http://deb.devuan.org/merged
       CACHE_PREFIX: pivuan-arm64-${{ inputs.board }}-${{ inputs.release }}
 

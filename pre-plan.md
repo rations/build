@@ -403,10 +403,10 @@ sudo apt install devuan-keyring      # also added to host dependencies automatic
 `.github/workflows/pivuan-build.yml` builds the image without a local checkout. It is run by hand (workflow_dispatch).
 
 - **Runner:** `ubuntu-24.04-arm` (native arm64, free for public repositories). This means an Ubuntu build host, not Devuan, so the Devuan keyring is supplied through `DEVUAN_KEYRING_FILE`.
-- **Keyring:** downloaded as the `devuan-keyring` package from `pkgmaster.devuan.org`, with its SHA256 checked against the release's `Packages` index. The workflow checks that both `InRelease` files (Devuan-only and merged) verify with it. Set the repository variable `DEVUAN_KEY_FINGERPRINTS` (from `gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg` on your Devuan machine) to pin the key. Until then the run summary shows the fingerprints and a warning.
+- **Keyring:** downloaded as the `devuan-keyring` package from `http://pkgmaster.devuan.org/devuan` (Devuan serves plain http; integrity comes from the checks below, as with apt), with its SHA256 checked against the release's `Packages` index. The workflow checks that both `InRelease` files (Devuan-only and merged) verify with it. Set the repository variable `DEVUAN_KEY_FINGERPRINTS` (from `gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg` on your Devuan machine) to pin the key. Until then the run summary shows the fingerprints and a warning.
 - **Build:** `./compile.sh build BOARD=rpi4b BRANCH=current RELEASE=excalibur BUILD_MINIMAL=yes BUILD_DESKTOP=no KERNEL_CONFIGURE=no EXPERT=yes PREFER_DOCKER=no COMPRESS_OUTPUTIMAGE=sha,xz`. The build runs natively; `compile.sh` re-runs itself with sudo.
 - **Cache:** `output/debs`, `output/packages-hashed` and `cache/rootfs` are restored and saved with `actions/cache`, so unchanged kernel and BSP packages and the rootfs tarball are reused. Pruning: packages older than 30 days, and all but the two newest rootfs tarballs. The cache is saved even when a later step fails.
 - **Outputs:** the `.img.xz` and `.sha` (kept 14 days) and `output/logs` are uploaded as run artifacts.
 - **Removed workflows:** Armbian's 29 upstream workflows are deleted in this fork (see `.github/workflows/README.md`).
 
-**Unknowns until the first run:** free disk on the arm64 runner after cleanup, total build time with an empty cache, and whether `pkgmaster.devuan.org` answers over HTTPS from GitHub's runners.
+**Unknowns until the first run:** free disk on the arm64 runner after cleanup, and total build time with an empty cache.
