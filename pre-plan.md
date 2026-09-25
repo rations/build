@@ -272,14 +272,14 @@ Put Devuan-only logic in `extensions/devuan.sh` wherever a hook can reach it. Ma
 - Optional: flash a community Devuan Pi 5 image from `arm-files.devuan.org` and see what it does differently (boot partition, inittab, firmware packages).
 - **Done when:** a Devuan arm64 rootfs tarball exists without `/lib/systemd/systemd`, and the package-availability list is recorded.
 
-### Phase 1: Devuan distribution in `build`
+### Phase 1: Devuan distribution in `build` (code written, not yet built; see §10)
 - Add `config/distributions/excalibur/` and `config/cli/excalibur/{debootstrap,main}/`.
-- Edit `main-config.sh`, `distro-specific.sh` (keyring and sources), and `apt-utils.sh`. Vendor the Devuan keyring.
-- Guard `rootfs-create.sh:295`. Add `chroot_sdcard_enable_service` and use it at `distro-agnostic.sh:461-475`.
+- Edit `main-config.sh` and `distro-specific.sh` (keyring and sources). Skip the Armbian base-files artifact on Devuan.
+- Guard `rootfs-create.sh` (`systemd-firstboot` mask). Add `enable_service_sdcard` / `service_exists_sdcard` and use them for the Armbian services in `distro-agnostic.sh`.
 - Handle inittab for serial and autologin, `resolv.conf`, and nsswitch.
 - Add `extensions/network/net-ifupdown.sh`.
 - Add `excalibur` to `host-release.sh:32`.
-- **Done when:** `./compile.sh build BOARD=rpi4b BRANCH=current RELEASE=excalibur BUILD_MINIMAL=yes BUILD_DESKTOP=no KERNEL_CONFIGURE=no SKIP_ARMBIAN_REPO=yes KEEP_ORIGINAL_OS_RELEASE=yes EXPERT=yes` produces an image, and `dpkg -l | grep -i systemd` in the image shows no `systemd` or `systemd-sysv`.
+- **Done when:** `./compile.sh build BOARD=rpi4b BRANCH=current RELEASE=excalibur BUILD_MINIMAL=yes BUILD_DESKTOP=no KERNEL_CONFIGURE=no EXPERT=yes` produces an image, and `dpkg -l | grep -i systemd` in the image shows no `systemd` or `systemd-sysv`. (`SKIP_ARMBIAN_REPO=yes` and `KEEP_ORIGINAL_OS_RELEASE=yes` are now set automatically for Devuan releases.)
 
 ### Phase 2: BSP, first boot, and Pi specifics
 - Add `/etc/init.d/armbian-*` scripts and `unblock-rfkill`, and make the BSP postinst init-aware.
@@ -338,8 +338,60 @@ Put Devuan-only logic in `extensions/devuan.sh` wherever a hook can reach it. Ma
 
 ## 9. Decisions needed for plan.md
 
-- [ ] Network stack for the minimal image: **ifupdown + chrony** (recommended, lightest) or NetworkManager without netplan.
-- [ ] Build host: native Devuan excalibur (add it to the host allow-list) or Docker mode.
+- [x] Network stack for the minimal image: **ifupdown + chrony**, with `wpasupplicant` for Wi-Fi.
+- [x] Build host: **native Devuan excalibur** (added to the host allow-list).
 - [ ] Project and image name: keep "Armvuan" despite the existing project, or pick another. This affects the `VENDOR` and `BOARD_NAME` strings.
 - [ ] How installed systems get updates: a private apt repo for kernel, BSP and armbian-config, or none.
 - [ ] Whether daedalus is also a target, or excalibur only.
+
+---
+
+## 10. Phase 1 implementation status
+
+Written in this fork and checked offline: `bash -n`, shellcheck (no new warnings apart from two expected "unused variable" notes for globals read by other files), shfmt with the repo's `.editorconfig`, `lib/tools/aggregation.py` for `RELEASE=excalibur ARCH=arm64`, and a test of the new helpers and the ifupdown extension against a fake rootfs. **Nothing has been built or booted yet.** The sandbox used to write it cannot reach `deb.devuan.org` or `gitlab.mister-muffin.de` (where the build fetches mmdebstrap).
+
+**How to build (on the Devuan excalibur host):**
+
+```sh
+sudo apt install devuan-keyring      # also added to host dependencies automatically on Devuan hosts
+./compile.sh build BOARD=rpi4b BRANCH=current RELEASE=excalibur \
+  BUILD_MINIMAL=yes BUILD_DESKTOP=no KERNEL_CONFIGURE=no EXPERT=yes
+```
+
+`EXPERT=yes` is needed because `config/distributions/excalibur/support` is `csc`. On a non-Devuan host, set `DEVUAN_KEYRING_FILE=/path/to/devuan-archive-keyring.gpg`.
+
+**What changed**
+
+| File | Change |
+|---|---|
+| `lib/functions/configuration/main-config.sh` | `is_devuan_release` helper (daedalus, excalibur, freia, ceres). `DISTRIBUTION="Devuan"`. `INIT_SYSTEM` (`sysvinit` for Devuan, else `systemd`), set early so family hooks see it. For Devuan: `SKIP_ARMBIAN_REPO=yes` (error if explicitly set to `no`) and `KEEP_ORIGINAL_OS_RELEASE=yes`. `DEVUAN_MIRROR` (default `deb.devuan.org/merged`) used as `APT_MIRROR`. New `NETWORKING_STACK=ifupdown`, the default for Devuan, enabling `net-ifupdown` + `net-chrony` |
+| `lib/functions/artifacts/artifact-rootfs.sh` | `SKIP_ARMBIAN_REPO` defaults to `yes` for Devuan (it is made read-only there before the main config runs) |
+| `lib/functions/main/build-packages.sh` | Skip the `armbian-base-files` artifact for Devuan (its upstream lookup only knows Debian/Ubuntu). This replaces the planned `apt-utils.sh` case |
+| `lib/functions/main/config-prepare.sh` | excalibur gets trixie's `cpufrequtils` removal, and Devuan the Debian `software-properties-common` removal |
+| `lib/functions/rootfs/distro-specific.sh` | Keyring: Devuan case copies `devuan-archive-keyring.gpg` from `DEVUAN_KEYRING_FILE` or the build host and passes `--keyring=` to mmdebstrap (not vendored in the repo). Sources: `devuan.sources` with `<release>`, `-updates`, `-security` (none for freia/ceres), `main contrib non-free non-free-firmware`. Sleep-disable drop-in goes to `/etc/elogind/sleep.conf.d` on sysvinit |
+| `lib/functions/rootfs/rootfs-create.sh` | Adds mmdebstrap's `hooks/merged-usr` for Devuan (Devuan bug #837), with a warning if the hook directory is missing. `systemctl mask systemd-firstboot` only on systemd |
+| `lib/functions/rootfs/systemd-utils.sh` | New `service_exists_sdcard` and `enable_service_sdcard` (`systemctl enable` or `update-rc.d <svc> defaults`). `disable_systemd_service_sdcard` gains a sysvinit branch (`update-rc.d <svc> disable`, timers ignored) |
+| `lib/functions/rootfs/distro-agnostic.sh` | Armbian services enabled through the helpers; on Devuan they are skipped until Phase 2 adds init scripts. Console autologin by `--autologin root` on the inittab getty lines. Serial consoles as `S<n>:2345:respawn:/sbin/getty -L <tty> <baud> vt100` lines in `/etc/inittab`. nsswitch without `mymachines` |
+| `lib/functions/rootfs/post-tweaks.sh` | Plain `/etc/resolv.conf` on sysvinit instead of the systemd-resolved symlink |
+| `lib/functions/host/host-release.sh`, `prepare-host.sh` | `daedalus`/`excalibur` accepted as build hosts. `devuan-keyring` added to host dependencies on Devuan hosts |
+| `config/distributions/excalibur/` | `arm64`, "Devuan 6 Excalibur", order 20, `csc`, upgrade `freia` |
+| `config/cli/excalibur/` | debootstrap: Debian list + `devuan-keyring sysvinit-core sysv-rc eudev`. main: common list minus `init dbus-user-session systemd-resolved`, plus `binutils dbus devuan-keyring elogind eudev libpam-elogind orphan-sysvinit-scripts sysv-rc sysvinit-core`. additional: trixie list minus `libpam-systemd libnss-myhostname` |
+| `config/optional/architectures/arm64/_config/cli/excalibur/` | Same as trixie (`gpiod mtd-utils`, `iozone3`) |
+| `extensions/network/net-ifupdown.sh` (new) | Adds `ifupdown isc-dhcp-client wpasupplicant`. Writes `/etc/network/interfaces` (`source-directory`), `interfaces.d/wired` (DHCP + SLAAC on `eth0` and `end0`), and a disabled `interfaces.d/wlan0.example` for Wi-Fi with `wpa-ssid`/`wpa-psk` |
+| `extensions/armbian-config.sh` | Does not add the upstream armbian-config apt source on Devuan (that package `Depends: systemd`) |
+| `config/sources/families/bcm2711.conf` | Devuan installs the same Debian Wi-Fi/Bluetooth firmware packages as Debian (never `raspberrypi-sys-mods` or `raspi-config`). `unblock-rfkill` systemd unit skipped on sysvinit |
+
+**Findings while implementing (these update §5.1)**
+
+- `z51-raspi-firmware` needs **no change**: on Devuan `/etc/os-release` has `ID=devuan`, so the hook runs and copies the in-BSP firmware to `/boot/firmware` on kernel upgrades. That is what we want, since Devuan does not install Debian's `raspi-firmware`.
+- The BSP package's maintainer scripts run with `set +e` and end in `true`, so their `systemctl` calls fail quietly and do not stop the build. Making them init-aware stays in Phase 2.
+- `wpasupplicant` was already in the common package list. The ifupdown extension adds it explicitly anyway.
+
+**Expected at first build (to check in Phase 0 / first run)**
+
+- Whether `isc-dhcp-client`, `elogind`, `libpam-elogind` and `orphan-sysvinit-scripts` exist in excalibur arm64. If `isc-dhcp-client` is gone, switch the extension to `dhcpcd-base`.
+- Whether mmdebstrap's `hooks/merged-usr` directory exists in the fetched mmdebstrap checkout (warning in the log if not), and whether the bootstrap succeeds with it.
+- Whether the Pi 5 Ethernet interface is `eth0` or `end0` under eudev (both are configured).
+- On first boot there is a console login (HDMI, and serial via `serial0`), but the Armbian **first-run and resize services are not enabled** yet (no init scripts until Phase 2), so the root filesystem is not expanded.
+- `armbian-firstlogin` is not a service: it starts from `/etc/profile.d` on the first root login (password: the build's `ROOTPWD`, default `1234`). It is not yet patched for sysvinit and is expected to stop at `systemctl restart ssh.service || exit 1` (Phase 2).
+- **SSH host keys:** `armbian-firstrun` normally regenerates them on first boot. Until Phase 2, every image built from the same rootfs shares the keys created at build time. Regenerate on each device: `rm /etc/ssh/ssh_host_* && dpkg-reconfigure openssh-server && service ssh restart`.

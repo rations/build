@@ -1,0 +1,9 @@
+apt-utils
+locales
+console-setup
+gpgv
+ca-certificates
+devuan-keyring
+sysvinit-core
+sysv-rc
+eudev

@@ -25,7 +25,10 @@ function determine_artifacts_to_build_for_image() {
 
 	# Userspace, RELEASE+ARCH specific, replaces the original distro's base-files
 	# This is always built, but only installed if KEEP_ORIGINAL_OS_RELEASE!=yes.
-	artifacts_to_build+=("armbian-base-files")
+	# Not for Devuan: the upstream base-files lookup only knows Debian/Ubuntu releases.
+	if [[ "${DISTRIBUTION}" != "Devuan" ]]; then
+		artifacts_to_build+=("armbian-base-files")
+	fi
 
 	if [[ "${DISTRIBUTION}" == "Ubuntu" ]]; then
 		artifacts_to_build+=("fake_ubuntu_advantage_tools")

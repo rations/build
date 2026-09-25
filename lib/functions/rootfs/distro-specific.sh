@@ -50,8 +50,11 @@ function install_distribution_specific() {
 	# states can re-enable them by setting:
 	#     POWER_MANAGEMENT_FEATURES=yes
 	if [[ "${POWER_MANAGEMENT_FEATURES:-"no"}" != "yes" ]]; then
-		mkdir -p "${SDCARD}/etc/systemd/sleep.conf.d"
-		cat <<- EOF > "${SDCARD}/etc/systemd/sleep.conf.d/00-disable.conf"
+		# elogind (used instead of systemd-logind on sysvinit) reads the same [Sleep] keys from its own directory.
+		declare sleep_conf_dir="/etc/systemd/sleep.conf.d"
+		[[ "${INIT_SYSTEM}" == "sysvinit" ]] && sleep_conf_dir="/etc/elogind/sleep.conf.d"
+		mkdir -p "${SDCARD}${sleep_conf_dir}"
+		cat <<- EOF > "${SDCARD}${sleep_conf_dir}/00-disable.conf"
 			[Sleep]
 			AllowSuspend=no
 			AllowHibernation=no
@@ -93,7 +96,7 @@ function install_distribution_specific() {
 
 #fetch_distro_keyring <release>
 #
-# <release>: debian or ubuntu release name
+# <release>: debian, ubuntu or devuan release name
 #
 function fetch_distro_keyring() {
 	declare release="${1}"
@@ -105,6 +108,9 @@ function fetch_distro_keyring() {
 			;;
 		focal | jammy | noble | oracular | plucky | questing | resolute)
 			distro="ubuntu"
+			;;
+		daedalus | excalibur | freia | ceres)
+			distro="devuan"
 			;;
 		*)
 			exit_with_error "fetch_distro_keyring failed" "unrecognized release: $release"
@@ -160,6 +166,22 @@ function fetch_distro_keyring() {
 			fi
 			debootstrap_arguments+=("--keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg")
 			;;
+		devuan)
+			# devuan-keyring is not packaged by Debian and github.armbian.com does not mirror it.
+			# Take it from DEVUAN_KEYRING_FILE if set, else from the build host (install the
+			# devuan-keyring package there; a Devuan build host already has it).
+			declare devuan_keyring_src="${DEVUAN_KEYRING_FILE:-/usr/share/keyrings/devuan-archive-keyring.gpg}"
+			if [[ -e "${CACHEDIR}/usr/share/keyrings/devuan-archive-keyring.gpg" ]]; then
+				display_alert "fetch_distro_keyring($release)" "cache found, skipping" "info"
+			else
+				[[ -f "${devuan_keyring_src}" ]] ||
+					exit_with_error "fetch_distro_keyring" "Devuan keyring not found at '${devuan_keyring_src}'; install devuan-keyring on the build host or set DEVUAN_KEYRING_FILE"
+				mkdir -p "${CACHEDIR}/usr/share/keyrings" "${CACHEDIR}/etc/apt/trusted.gpg.d"
+				run_host_command_logged cp -v "${devuan_keyring_src}" "${CACHEDIR}/usr/share/keyrings/devuan-archive-keyring.gpg"
+				display_alert "fetch_distro_keyring($release)" "copied from ${devuan_keyring_src}" "info"
+			fi
+			debootstrap_arguments+=("--keyring=/usr/share/keyrings/devuan-archive-keyring.gpg")
+			;;
 		*)
 			exit_with_error "fetch_distro_keyring" "unrecognized distro: $distro"
 			;;
@@ -173,7 +195,7 @@ function fetch_distro_keyring() {
 # create_sources_list_and_deploy_repo_key <when> <release> <basedir>
 #
 # <when>: rootfs|image
-# <release>: bullseye|bookworm|trixie|forky|sid|focal|jammy|noble|oracular|plucky|questing|resolute
+# <release>: bullseye|bookworm|trixie|forky|sid|focal|jammy|noble|oracular|plucky|questing|resolute|daedalus|excalibur|freia|ceres
 # <basedir>: path to root directory
 #
 function create_sources_list_and_deploy_repo_key() {
@@ -261,6 +283,25 @@ function create_sources_list_and_deploy_repo_key() {
 				Suites: ${release} ${release}-security ${release}-updates ${release}-backports
 				Components: main restricted universe multiverse
 				Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+			EOF
+			;;
+
+		daedalus | excalibur | freia | ceres)
+			distro="devuan"
+
+			# Devuan's merged archive serves the -updates and -security suites from the same mirror.
+			# freia (testing) and ceres (unstable) have no -updates/-security.
+			declare -a devuan_suites=("${release}")
+			if [[ "${release}" != "freia" && "${release}" != "ceres" ]]; then
+				devuan_suites+=("${release}-updates" "${release}-security")
+			fi
+
+			cat <<- EOF > "${basedir}/etc/apt/sources.list.d/${distro}.sources"
+				Types: deb
+				URIs: http://${DEVUAN_MIRROR}
+				Suites: ${devuan_suites[@]}
+				Components: main contrib non-free non-free-firmware
+				Signed-By: /usr/share/keyrings/devuan-archive-keyring.gpg
 			EOF
 			;;
 	esac

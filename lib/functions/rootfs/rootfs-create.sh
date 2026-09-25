@@ -109,6 +109,16 @@ function create_new_rootfs_cache_via_debootstrap() {
 
 	fetch_distro_keyring "$RELEASE"
 
+	# Devuan forks base-files, and its bootstrap needs merged /usr set up explicitly (Devuan bug #837;
+	# debootstrap needs --merged-usr there). mmdebstrap ships a hook that does exactly that.
+	if [[ "${DISTRIBUTION}" == "Devuan" ]]; then
+		if [[ -d "${debootstrap_wanted_dir}/hooks/merged-usr" ]]; then
+			debootstrap_arguments+=("'--hook-dir=${debootstrap_wanted_dir}/hooks/merged-usr'")
+		else
+			display_alert "mmdebstrap merged-usr hook not found" "${debootstrap_wanted_dir}/hooks/merged-usr" "wrn"
+		fi
+	fi
+
 	# Small detour for local apt caching option.
 	local_apt_deb_cache_prepare "before mmdebstrap" # sets LOCAL_APT_CACHE_INFO
 	if [[ "${LOCAL_APT_CACHE_INFO[USE]}" == "yes" ]]; then
@@ -292,7 +302,10 @@ function create_new_rootfs_cache_via_debootstrap() {
 
 	# Mask `systemd-firstboot.service` which will prompt locale, timezone and root-password too early.
 	# `armbian-first-run` will do the same thing later
-	chroot_sdcard systemctl mask systemd-firstboot.service
+	# (Not present on sysvinit targets such as Devuan.)
+	if [[ "${INIT_SYSTEM}" != "sysvinit" ]]; then
+		chroot_sdcard systemctl mask systemd-firstboot.service
+	fi
 
 	# undeploy the qemu binary; we don't want to ship the host's qemu binary in the rootfs cache.
 	undeploy_qemu_binary_from_chroot "${SDCARD}" "rootfs"

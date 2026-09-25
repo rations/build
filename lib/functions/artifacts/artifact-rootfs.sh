@@ -186,7 +186,10 @@ function artifact_rootfs_cli_adapter_config_prep() {
 	# while the rootfs is being assembled. Default to "no" (repo ON)
 	# and let boards/userpatches opt out explicitly if they still need
 	# the repo-free rootfs behaviour for whatever reason.
-	declare -g SKIP_ARMBIAN_REPO="${SKIP_ARMBIAN_REPO:-no}"
+	# Devuan: apt.armbian.com has no Devuan suites, so default to skipping it there.
+	declare _default_skip_armbian_repo="no"
+	is_devuan_release "${RELEASE}" && _default_skip_armbian_repo="yes"
+	declare -g SKIP_ARMBIAN_REPO="${SKIP_ARMBIAN_REPO:-${_default_skip_armbian_repo}}"
 	declare -g -r SKIP_ARMBIAN_REPO # make it readonly to ensure sanity if hooks try to change it
 
 	track_general_config_variables "in artifact_rootfs_cli_adapter_config_prep"

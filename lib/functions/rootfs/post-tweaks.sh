@@ -13,11 +13,19 @@ function post_debootstrap_tweaks() {
 	# adjust tzselect to improve political correctness
 	sed -i "s/Please select a country/Please select a country or a region/g" "${SDCARD}"/usr/bin/tzselect
 
-	# activate systemd-resolved
-	display_alert "Activating systemd-resolved" "Symlinking /etc/resolv.conf to /run/systemd/resolve/stub-resolv.conf" "debug"
-	run_host_command_logged rm -fv "${SDCARD}"/etc/resolv.conf
-	# The method of symlinking to /run/systemd/resolve/stub-resolv.conf is recommended, see https://www.man7.org/linux/man-pages/man8/systemd-resolved.service.8.html
-	run_host_command_logged ln -s /run/systemd/resolve/stub-resolv.conf "${SDCARD}"/etc/resolv.conf
+	if [[ "${INIT_SYSTEM}" == "sysvinit" ]]; then
+		# No systemd-resolved on sysvinit (Devuan): ship a plain file, which the DHCP client
+		# (or NetworkManager, once installed) rewrites at boot. Drops the build host's nameserver.
+		display_alert "Writing plain /etc/resolv.conf" "no systemd-resolved on ${INIT_SYSTEM}" "debug"
+		run_host_command_logged rm -fv "${SDCARD}"/etc/resolv.conf
+		echo "# Filled in at boot by the DHCP client or NetworkManager." > "${SDCARD}"/etc/resolv.conf
+	else
+		# activate systemd-resolved
+		display_alert "Activating systemd-resolved" "Symlinking /etc/resolv.conf to /run/systemd/resolve/stub-resolv.conf" "debug"
+		run_host_command_logged rm -fv "${SDCARD}"/etc/resolv.conf
+		# The method of symlinking to /run/systemd/resolve/stub-resolv.conf is recommended, see https://www.man7.org/linux/man-pages/man8/systemd-resolved.service.8.html
+		run_host_command_logged ln -s /run/systemd/resolve/stub-resolv.conf "${SDCARD}"/etc/resolv.conf
+	fi
 
 	# remove service start blockers
 	run_host_command_logged rm -fv "${SDCARD}"/sbin/initctl "${SDCARD}"/sbin/start-stop-daemon

@@ -4,6 +4,11 @@
 # and they are moved to main armbian repo periodically
 
 function custom_apt_repo__add_armbian-github-repo() {
+	# Upstream armbian-config Depends: systemd. Devuan images get a sysvinit-capable build from the configng fork instead.
+	if [[ "${DISTRIBUTION}" == "Devuan" ]]; then
+		display_alert "Not adding upstream armbian-config repo" "${DISTRIBUTION}: package depends on systemd" "info"
+		return 0
+	fi
 	cat <<- EOF > "${SDCARD}"/etc/apt/sources.list.d/armbian-config.sources
 		Types: deb
 		URIs: http://github.armbian.com/configng

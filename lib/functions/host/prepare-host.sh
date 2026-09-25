@@ -232,6 +232,12 @@ function adaptative_prepare_host_dependencies() {
 		*) host_dependencies+=("qemu::qemu-user-static") ;;
 	esac
 
+	# Devuan build host: devuan-keyring provides the archive key used to bootstrap Devuan targets
+	# (see fetch_distro_keyring). Debian/Ubuntu hosts don't carry it; set DEVUAN_KEYRING_FILE there instead.
+	case "${host_release}" in
+		daedalus | excalibur | freia | ceres) host_dependencies+=("core::devuan-keyring") ;;
+	esac
+
 	### Python2 -- required for some older u-boot builds
 	# Debian newer than 'bookworm' and Ubuntu newer than 'lunar'/'mantic' does not carry python2 anymore; in this case some u-boot's might fail to build.
 	# Last versions to support python2 were Debian 'bullseye' and Ubuntu 'jammy'

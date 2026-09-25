@@ -9,6 +9,12 @@
 
 ### Attention: we can't use any interactive programs, read from stdin, nor use non-coreutils utilities here.
 
+# Devuan (Debian without systemd) codenames known to this fork.
+# Used before DISTRIBUTION is set (e.g. for the NETWORKING_STACK default), so it keys on the release name.
+function is_devuan_release() {
+	[[ "${1}" =~ ^(daedalus|excalibur|freia|ceres)$ ]]
+}
+
 function do_main_configuration() {
 	display_alert "Starting main configuration" "${MOUNT_UUID}" "info"
 
@@ -19,6 +25,23 @@ function do_main_configuration() {
 	declare -g -r PACKAGE_LIST_ADDITIONAL
 	declare -g -r PACKAGE_LIST_EXTERNAL
 	declare -g -r PACKAGE_LIST_DESKTOP
+
+	# Init system of the target rootfs. Devuan images are built with sysvinit; everything else uses systemd.
+	# Helpers in lib/functions/rootfs/systemd-utils.sh use this to choose between systemctl and update-rc.d.
+	# Set this early (before the family config is sourced) so family hooks can rely on it.
+	if is_devuan_release "${RELEASE}"; then
+		declare -g INIT_SYSTEM="sysvinit"
+		# apt.armbian.com has no Devuan suites. Families read this while being sourced (e.g. bcm2711), so set it here.
+		if [[ -z "${SKIP_ARMBIAN_REPO}" ]]; then
+			declare -g SKIP_ARMBIAN_REPO="yes"
+		elif [[ "${SKIP_ARMBIAN_REPO}" != "yes" ]]; then
+			exit_with_error "SKIP_ARMBIAN_REPO=${SKIP_ARMBIAN_REPO} is not supported for ${RELEASE}" "apt.armbian.com has no Devuan suites"
+		fi
+		# The Armbian base-files replacement is looked up per Debian/Ubuntu release; there is none for Devuan.
+		declare -g KEEP_ORIGINAL_OS_RELEASE="yes"
+	else
+		declare -g INIT_SYSTEM="systemd"
+	fi
 
 	# common options
 	declare revision_from="set in env or command-line parameter"
@@ -80,7 +103,11 @@ function do_main_configuration() {
 		display_alert "NETWORKING_STACK not set" "Calculating defaults" "debug"
 		# Network-manager and Chrony for standard CLI and desktop, systemd-networkd and systemd-timesyncd for minimal
 		# systemd-timesyncd is slimmer and less resource intensive than Chrony, see https://unix.stackexchange.com/questions/504381/chrony-vs-systemd-timesyncd-what-are-the-differences-and-use-cases-as-ntp-cli
-		if [[ "${BUILD_MINIMAL}" == "yes" ]]; then
+		if is_devuan_release "${RELEASE}"; then
+			# Devuan has no systemd-networkd/timesyncd; netplan is not used either.
+			display_alert "Devuan release ${RELEASE}" "Using ifupdown" "debug"
+			NETWORKING_STACK="ifupdown"
+		elif [[ "${BUILD_MINIMAL}" == "yes" ]]; then
 			display_alert "BUILD_MINIMAL is set to yes" "Using systemd-networkd" "debug"
 			NETWORKING_STACK="systemd-networkd"
 		else
@@ -343,6 +370,11 @@ function do_main_configuration() {
 			enable_extension "net-systemd-networkd"
 			enable_extension "net-systemd-timesyncd"
 			;;
+		"ifupdown")
+			display_alert "Adding networking extensions" "net-ifupdown, net-chrony" "info"
+			enable_extension "net-ifupdown"
+			enable_extension "net-chrony"
+			;;
 		"none")
 			display_alert "NETWORKING_STACK=${NETWORKING_STACK}" "Not adding networking extensions" "info"
 			;;
@@ -396,9 +428,15 @@ function do_extra_configuration() {
 
 	if [[ "$RELEASE" =~ ^(focal|jammy|noble|oracular|plucky|questing|resolute)$ ]]; then
 		DISTRIBUTION="Ubuntu"
+	elif is_devuan_release "${RELEASE}"; then
+		DISTRIBUTION="Devuan"
 	else
 		DISTRIBUTION="Debian"
 	fi
+
+	# Devuan's "merged" archive: Devuan-forked packages plus everything else passed through from Debian.
+	# It also carries the -updates and -security suites. Override with DEVUAN_MIRROR=<host/path>.
+	DEVUAN_MIRROR="${DEVUAN_MIRROR:-deb.devuan.org/merged}"
 
 	DEBIAN_MIRROR='deb.debian.org/debian'
 	# loong64 was promoted from debian-ports into the main Debian archive (it is
@@ -479,6 +517,8 @@ function do_extra_configuration() {
 	APT_MIRROR=$DEBIAN_MIRROR
 	if [[ $DISTRIBUTION == Ubuntu ]]; then
 		APT_MIRROR=$UBUNTU_MIRROR
+	elif [[ $DISTRIBUTION == Devuan ]]; then
+		APT_MIRROR=$DEVUAN_MIRROR
 	fi
 
 	# Derive APT_PROXY_ADDR from proxy env vars if unset, which runners.sh uses inside chroot.

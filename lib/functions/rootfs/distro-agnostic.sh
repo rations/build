@@ -141,7 +141,11 @@ function install_distribution_agnostic() {
 	chroot_sdcard "(" echo "'${ROOTPWD}'" ";" echo "'${ROOTPWD}'" ";" ")" "|" passwd root
 
 	# enable automated login to console(s)
-	if [[ $CONSOLE_AUTOLOGIN == yes ]]; then
+	if [[ $CONSOLE_AUTOLOGIN == yes && "${INIT_SYSTEM}" == "sysvinit" ]]; then
+		# sysvinit: gettys are spawned from /etc/inittab. Add --autologin to the tty1..6 lines
+		# (agetty accepts it; serial lines added below get it too).
+		sed -E -i 's#^([1-6]:[0-9]+:respawn:/sbin/getty) #\1 --noissue --autologin root #' "${SDCARD}"/etc/inittab
+	elif [[ $CONSOLE_AUTOLOGIN == yes ]]; then
 		mkdir -p "${SDCARD}"/etc/systemd/system/getty@.service.d/
 		mkdir -p "${SDCARD}"/etc/systemd/system/serial-getty@.service.d/
 		# @TODO: check why there was a sleep 10s in ExecStartPre
@@ -458,21 +462,23 @@ function install_distribution_agnostic() {
 	FAMILY_TWEAKS
 
 	# enable additional services, if they exist.
-	display_alert "Enabling Armbian services" "systemd" "info"
-	if [[ -f "${SDCARD}"/lib/systemd/system/armbian-firstrun.service ]]; then
+	display_alert "Enabling Armbian services" "${INIT_SYSTEM}" "info"
+	if service_exists_sdcard armbian-firstrun.service; then
 		# Note: armbian-firstrun starts before the user has a chance to edit the env file's values.
 		# Exceptionaly, the env file can be edited during image build time
 		if test -n "$OPENSSHD_REGENERATE_HOST_KEYS"; then
 			sed -i "s/\(^OPENSSHD_REGENERATE_HOST_KEYS *= *\).*/\1$OPENSSHD_REGENERATE_HOST_KEYS/" "${SDCARD}"/etc/default/armbian-firstrun
 		fi
-		chroot_sdcard systemctl --no-reload enable armbian-firstrun.service
+		enable_service_sdcard armbian-firstrun.service
 	fi
-	[[ -f "${SDCARD}"/lib/systemd/system/armbian-zram-config.service ]] && chroot_sdcard systemctl --no-reload enable armbian-zram-config.service
-	[[ -f "${SDCARD}"/lib/systemd/system/armbian-hardware-optimize.service ]] && chroot_sdcard systemctl --no-reload enable armbian-hardware-optimize.service
-	[[ -f "${SDCARD}"/lib/systemd/system/armbian-ramlog.service ]] && chroot_sdcard systemctl --no-reload enable armbian-ramlog.service
-	[[ -f "${SDCARD}"/lib/systemd/system/armbian-resize-filesystem.service ]] && chroot_sdcard systemctl --no-reload enable armbian-resize-filesystem.service
-	[[ -f "${SDCARD}"/lib/systemd/system/armbian-hardware-monitor.service ]] && chroot_sdcard systemctl --no-reload enable armbian-hardware-monitor.service
-	[[ -f "${SDCARD}"/lib/systemd/system/armbian-led-state.service ]] && chroot_sdcard systemctl --no-reload enable armbian-led-state.service
+	declare armbian_service
+	for armbian_service in armbian-zram-config armbian-hardware-optimize armbian-ramlog armbian-resize-filesystem armbian-hardware-monitor armbian-led-state; do
+		if service_exists_sdcard "${armbian_service}.service"; then
+			enable_service_sdcard "${armbian_service}.service"
+		else
+			display_alert "Not enabling ${armbian_service}" "no ${INIT_SYSTEM} service on target" "debug"
+		fi
+	done
 
 	# switch to beta repository at this stage if building nightly images
 	if [[ $IMAGE_TYPE == nightly && -f "${SDCARD}"/etc/apt/sources.list.d/armbian.sources ]]; then
@@ -507,6 +513,10 @@ function install_distribution_agnostic() {
 	#
 	ifs=$IFS
 	local _serialcon_csv="${SERIALCON:-ttyS0}"
+	declare -i serial_inittab_index=0 # sysvinit only: next S<n> id for /etc/inittab
+	if [[ "${INIT_SYSTEM}" == "sysvinit" && ! -f "${SDCARD}"/etc/inittab ]]; then
+		exit_with_error "INIT_SYSTEM=sysvinit but target has no /etc/inittab" "is sysvinit-core in the package list?"
+	fi
 	for i in ${_serialcon_csv//,/ }; do
 		IFS=':' read -r -a array <<< "$i"
 		[[ "${array[0]}" == "tty1" ]] && continue # Don't enable tty1 as serial console.
@@ -514,6 +524,16 @@ function install_distribution_agnostic() {
 		# add serial console to secure tty list
 		[ -z "$(grep -w '^${array[0]}' "${SDCARD}"/etc/securetty 2> /dev/null)" ] &&
 			echo "${array[0]}" >> "${SDCARD}"/etc/securetty
+		if [[ "${INIT_SYSTEM}" == "sysvinit" ]]; then
+			# sysvinit: one respawning getty line in /etc/inittab per serial console, id "S<n>".
+			declare inittab_id="S${serial_inittab_index}"
+			serial_inittab_index+=1
+			declare getty_opts="-L"
+			[[ $CONSOLE_AUTOLOGIN == yes ]] && getty_opts="-L --noissue --autologin root"
+			sed -i "/^${inittab_id}:/d" "${SDCARD}"/etc/inittab
+			echo "${inittab_id}:2345:respawn:/sbin/getty ${getty_opts} ${array[0]} ${array[1]:-115200} vt100" >> "${SDCARD}"/etc/inittab
+			continue
+		fi
 		if [[ ${array[1]} != "115200" && -n ${array[1]} ]]; then
 			# make a copy, fix speed and enable
 			cp "${SDCARD}"/lib/systemd/system/serial-getty@.service \
@@ -577,7 +597,12 @@ function install_distribution_agnostic() {
 		cp "${SDCARD}"/usr/share/doc/avahi-daemon/examples/ssh.service "${SDCARD}"/etc/avahi/services/
 
 	# nsswitch settings for sane DNS behavior: remove resolve, assure libnss-myhostname support
-	sed "s/hosts\:.*/hosts:          files mymachines dns myhostname/g" -i "${SDCARD}"/etc/nsswitch.conf
+	# (mymachines is systemd-machined; there is no such module on sysvinit/Devuan)
+	if [[ "${INIT_SYSTEM}" == "sysvinit" ]]; then
+		sed "s/hosts\:.*/hosts:          files dns myhostname/g" -i "${SDCARD}"/etc/nsswitch.conf
+	else
+		sed "s/hosts\:.*/hosts:          files mymachines dns myhostname/g" -i "${SDCARD}"/etc/nsswitch.conf
+	fi
 
 	# Show logo
 	if [[ $PLYMOUTH == yes ]]; then
