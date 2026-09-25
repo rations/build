@@ -17,8 +17,9 @@ and Git reports conflicts on those files, resolve them by keeping the deletion:
 
     git rm .github/workflows/<file>.yml
 
-Optional repository variable (Settings > Secrets and variables > Actions > Variables):
-
-- `DEVUAN_KEY_FINGERPRINTS`: fingerprint(s) of the Devuan archive signing key(s),
-  as shown by `gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg` on a
-  Devuan machine you trust. When set, the build only trusts those keys.
+Devuan archive keys: `pivuan-build.yml` pins the fingerprints of the keys that sign
+excalibur (`DEVUAN_KEY_FINGERPRINTS` in the job's `env`), and the build only trusts those.
+To override them without editing the workflow, set the optional repository variable
+`DEVUAN_KEY_FINGERPRINTS` (Settings > Secrets and variables > Actions > Variables) to the
+fingerprint(s) shown by `gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg` on a
+Devuan machine you trust.

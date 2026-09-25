@@ -3,11 +3,12 @@
 # Run it from the Actions tab: "Pivuan image build" -> "Run workflow" -> pick the branch.
 # (GitHub only shows the Run button for workflows that exist on the default branch.)
 #
-# Trust anchor for the Devuan archive: set the repository variable DEVUAN_KEY_FINGERPRINTS
-# (Settings -> Secrets and variables -> Actions -> Variables) to the fingerprint(s) shown by
-#   gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg
-# on a Devuan machine you trust. Until it is set, the keyring is taken on first use and the
-# fingerprints it contains are printed in the run summary for you to compare.
+# Trust anchor for the Devuan archive: the build only trusts the signing keys pinned in
+# DEVUAN_KEY_FINGERPRINTS below (the keys signing excalibur on pkgmaster.devuan.org and
+# deb.devuan.org/merged). To change them without editing this file, set the repository variable
+# DEVUAN_KEY_FINGERPRINTS (Settings -> Secrets and variables -> Actions -> Variables); it takes
+# precedence. Compare with `gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg` on a
+# Devuan machine you trust. When Devuan rotates a key, the keyring step fails and names the new signer.
 
 name: Pivuan image build
 
@@ -55,7 +56,9 @@ jobs:
       RELEASE: ${{ inputs.release }}
       KERNEL_BRANCH: ${{ inputs.kernel_branch }}
       BUILD_MINIMAL: ${{ inputs.build_minimal && 'yes' || 'no' }}
-      DEVUAN_KEY_FINGERPRINTS: ${{ vars.DEVUAN_KEY_FINGERPRINTS }}
+      # 72E3CB77...: primary Devuan signing key (pkgmaster.devuan.org/devuan).
+      # 9F8D6C74...: Excalibur release key (deb.devuan.org/merged), listed at https://www.devuan.org/os/keyring
+      DEVUAN_KEY_FINGERPRINTS: ${{ vars.DEVUAN_KEY_FINGERPRINTS || '72E3CB773315DFA2E464743D94532124541922FB 9F8D6C74DE661075FD171BE3B3982868D104092C' }}
       # Devuan-only repository (holds devuan-keyring) and the merged archive the image is built from.
       # Devuan serves these over plain http, like apt: integrity comes from the SHA256 in the Packages
       # index, the InRelease signatures, and (once set) the pinned fingerprints, not from the transport.
