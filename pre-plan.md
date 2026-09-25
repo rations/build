@@ -1,4 +1,4 @@
-# Armvuan pre-plan: Devuan (sysvinit, no systemd) minimal image for Raspberry Pi 5
+# Pivuan pre-plan: Devuan (sysvinit, no systemd) minimal image for Raspberry Pi 5
 
 > Status: **pre-plan**. This file records research and feasibility findings. It will be refined into `plan.md`.
 > Scope: private forks `rations/build` and `rations/configng`. Nothing here is meant for upstream Armbian.
@@ -84,12 +84,12 @@ sudo apt install mmdebstrap qemu-user-static binfmt-support devuan-keyring
 sudo mmdebstrap --architectures=arm64 --variant=minbase \
   --keyring=/usr/share/keyrings/devuan-archive-keyring.gpg \
   --include=devuan-keyring,sysvinit-core,eudev,ifupdown,elogind,libpam-elogind \
-  excalibur /tmp/armvuan-rootfs.tar \
+  excalibur /tmp/pivuan-rootfs.tar \
   "deb http://deb.devuan.org/merged excalibur main contrib non-free non-free-firmware" \
   "deb http://deb.devuan.org/merged excalibur-updates main contrib non-free non-free-firmware" \
   "deb http://deb.devuan.org/merged excalibur-security main contrib non-free"
 # check: the init binary must be sysvinit, and systemd itself must be absent
-tar -tf /tmp/armvuan-rootfs.tar | grep -E '(^|/)(usr/)?lib/systemd/systemd$' || echo "OK: no systemd PID1"
+tar -tf /tmp/pivuan-rootfs.tar | grep -E '(^|/)(usr/)?lib/systemd/systemd$' || echo "OK: no systemd PID1"
 ```
 
 ---
@@ -308,7 +308,7 @@ Put Devuan-only logic in `extensions/devuan.sh` wherever a hook can reach it. Ma
 
 ## 7. Prior art to study
 
-- **`amateur80lvl/armvuan`** (https://github.com/amateur80lvl/armvuan). A Devuan fork of Armbian that uses **this same name**.
+- **`amateur80lvl/armvuan`** (https://github.com/amateur80lvl/armvuan). A Devuan fork of Armbian (this project was first going to use the same name; it is now **Pivuan**).
   - It targets daedalus, uses the `./compile.sh armvuan-build … RELEASE=daedalus` command, and converted only `armbian-ramlog` and `armbian-hardware-optimization` to sysvinit.
   - Read it for its patches.
   - **Name clash:** pick a different name, or accept the overlap, before publishing anything.
@@ -340,7 +340,7 @@ Put Devuan-only logic in `extensions/devuan.sh` wherever a hook can reach it. Ma
 
 - [x] Network stack for the minimal image: **ifupdown + chrony**, with `wpasupplicant` for Wi-Fi.
 - [x] Build host: **native Devuan excalibur** (added to the host allow-list).
-- [ ] Project and image name: keep "Armvuan" despite the existing project, or pick another. This affects the `VENDOR` and `BOARD_NAME` strings.
+- [x] Project and image name: **Pivuan**. Devuan builds default to `VENDOR=Pivuan` (image file names, motd, `/etc/issue`).
 - [ ] How installed systems get updates: a private apt repo for kernel, BSP and armbian-config, or none.
 - [ ] Whether daedalus is also a target, or excalibur only.
 
@@ -395,3 +395,18 @@ sudo apt install devuan-keyring      # also added to host dependencies automatic
 - On first boot there is a console login (HDMI, and serial via `serial0`), but the Armbian **first-run and resize services are not enabled** yet (no init scripts until Phase 2), so the root filesystem is not expanded.
 - `armbian-firstlogin` is not a service: it starts from `/etc/profile.d` on the first root login (password: the build's `ROOTPWD`, default `1234`). It is not yet patched for sysvinit and is expected to stop at `systemctl restart ssh.service || exit 1` (Phase 2).
 - **SSH host keys:** `armbian-firstrun` normally regenerates them on first boot. Until Phase 2, every image built from the same rootfs shares the keys created at build time. Regenerate on each device: `rm /etc/ssh/ssh_host_* && dpkg-reconfigure openssh-server && service ssh restart`.
+
+---
+
+## 11. Building in GitHub Actions
+
+`.github/workflows/pivuan-build.yml` builds the image without a local checkout. It is run by hand (workflow_dispatch).
+
+- **Runner:** `ubuntu-24.04-arm` (native arm64, free for public repositories). This means an Ubuntu build host, not Devuan, so the Devuan keyring is supplied through `DEVUAN_KEYRING_FILE`.
+- **Keyring:** downloaded as the `devuan-keyring` package from `pkgmaster.devuan.org`, with its SHA256 checked against the release's `Packages` index. The workflow checks that both `InRelease` files (Devuan-only and merged) verify with it. Set the repository variable `DEVUAN_KEY_FINGERPRINTS` (from `gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg` on your Devuan machine) to pin the key. Until then the run summary shows the fingerprints and a warning.
+- **Build:** `./compile.sh build BOARD=rpi4b BRANCH=current RELEASE=excalibur BUILD_MINIMAL=yes BUILD_DESKTOP=no KERNEL_CONFIGURE=no EXPERT=yes PREFER_DOCKER=no COMPRESS_OUTPUTIMAGE=sha,xz`. The build runs natively; `compile.sh` re-runs itself with sudo.
+- **Cache:** `output/debs`, `output/packages-hashed` and `cache/rootfs` are restored and saved with `actions/cache`, so unchanged kernel and BSP packages and the rootfs tarball are reused. Pruning: packages older than 30 days, and all but the two newest rootfs tarballs. The cache is saved even when a later step fails.
+- **Outputs:** the `.img.xz` and `.sha` (kept 14 days) and `output/logs` are uploaded as run artifacts.
+- **Removed workflows:** Armbian's 29 upstream workflows are deleted in this fork (see `.github/workflows/README.md`).
+
+**Unknowns until the first run:** free disk on the arm64 runner after cleanup, total build time with an empty cache, and whether `pkgmaster.devuan.org` answers over HTTPS from GitHub's runners.

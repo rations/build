@@ -1,67 +1,24 @@
-# Runners requirements
+# Workflows (Pivuan fork)
 
-- big (6-16 cores, 64Gb SSD, 16Gb memory, 2Gb swap)
-- small (4 cores, 64Gb SSD, 8Gb memory, 2Gb swap)
+This fork builds **Pivuan**: Devuan (sysvinit, no systemd) images for the Raspberry Pi,
+using the Armbian build framework. See `pre-plan.md` in the repository root.
 
-## Preparation
+Only one workflow is kept:
 
+- `pivuan-build.yml`: **Pivuan image build**. Run it by hand from the Actions tab
+  ("Run workflow"). It builds on a GitHub-hosted arm64 runner and uploads the
+  `.img.xz` and the build logs as run artifacts. Kernel packages and the rootfs
+  are cached between runs.
 
+Armbian's own workflows (issue/PR automation, label and board syncing, mirroring,
+security scans, scheduled maintenance) were removed. They target armbian/build's
+infrastructure and would only fail or create noise here. If you sync from upstream
+and Git reports conflicts on those files, resolve them by keeping the deletion:
 
-Adding x86 runner to your Jammy VM (check [here](https://docs.github.com/en/actions/hosting-your-own-runners/adding-self-hosted-runners) if any changes):
+    git rm .github/workflows/<file>.yml
 
-    $ mkdir actions-runner 
-    $ cd actions-runner
-    $ curl -o actions-runner-linux-x64-2.294.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.294.0/actions-runner-linux-x64-2.294.0.tar.gz
-    $ tar xzf ./actions-runner-linux-x64-2.294.0.tar.gz
+Optional repository variable (Settings > Secrets and variables > Actions > Variables):
 
-## Configuration
-
-Once asked, tag your runner accordingly:
-
-- small
-- big
-- arm64
-
-Start the configuration experience
-
-    $ ./config.sh --url https://github.com/armbian --token XXXXXXXXXXXXXXXXXXXXXXXXXXX
-
-You need to get a valid token from our DevOps team to proceed.
-
-## Create startup scripts
-
-    sudo ./svc.sh install # install
-    sudo ./svc.sh start   # start
-    sudo ./svc.sh status  # check
-
-## Use workflows in forked repositories
-
-`forked-helper.yml` workflow helper can help to run custom workflows on the forked repositories.
-
-1. Create a [fine-grained Personal Access Token (PAT)](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) with the `repo` scope and store it as a secret. It needs the following permissions on the target repositories:
-    - `contents`: read & write
-    - `metadata`: read only (automatically selected when selecting the contents permission)
-2. Create a secret named `ARMBIAN_SELF_DISPATCH_TOKEN` on your repository with `security_events` permissions. To do this, head to your forked repository, go to `Settings` on the top bar, select `Secrets and variables` and then `Actions`. From here you can create a new repository secret.
-    - `Name`: `ARMBIAN_SELF_DISPATCH_TOKEN`
-    - `Secret`: Paste your fine-grained Personal Access Token that you created in step 1 here
-3. Helper will dispatch `repository_dispatch` event `armbian` on `push`, `release`, `deployment`, 
-   `pull_request` and `workflow_dispatch` events. All needed event details you can find in `client_payload` property of the event.
-4. Create empty default branch in forked repository
-5. Create workflow with `repository_dispatch` in default branch.
-6. Run any need actions in this workflow.
-
-Workflow example:
-```yaml
-name: Test Armbian dispatch
-
-on:
-  repository_dispatch:
-    types: ["armbian"]
-
-jobs:
-  show-dispatch:
-    name: Show dispatch event details
-    runs-on: ubuntu-latest
-    steps:
-      - uses: hmarr/debug-action@v2
-```
+- `DEVUAN_KEY_FINGERPRINTS`: fingerprint(s) of the Devuan archive signing key(s),
+  as shown by `gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg` on a
+  Devuan machine you trust. When set, the build only trusts those keys.

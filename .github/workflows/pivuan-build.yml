@@ -1,0 +1,245 @@
+# Build a Pivuan image: Devuan (sysvinit, no systemd) for the Raspberry Pi, using this Armbian fork.
+#
+# Run it from the Actions tab: "Pivuan image build" -> "Run workflow" -> pick the branch.
+# (GitHub only shows the Run button for workflows that exist on the default branch.)
+#
+# Trust anchor for the Devuan archive: set the repository variable DEVUAN_KEY_FINGERPRINTS
+# (Settings -> Secrets and variables -> Actions -> Variables) to the fingerprint(s) shown by
+#   gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg
+# on a Devuan machine you trust. Until it is set, the keyring is taken on first use and the
+# fingerprints it contains are printed in the run summary for you to compare.
+
+name: Pivuan image build
+
+on:
+  workflow_dispatch:
+    inputs:
+      board:
+        description: "Armbian board (rpi4b covers the Pi 3, 4 and 5)"
+        type: string
+        default: rpi4b
+      kernel_branch:
+        description: "Kernel branch"
+        type: choice
+        options: [current, edge, legacy]
+        default: current
+      release:
+        description: "Devuan release"
+        type: choice
+        options: [excalibur]
+        default: excalibur
+      build_minimal:
+        description: "Minimal image (like the Debian minimal image)"
+        type: boolean
+        default: true
+      use_cache:
+        description: "Reuse kernel/package and rootfs caches from earlier runs"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pivuan-${{ github.ref }}-${{ inputs.board }}-${{ inputs.release }}-${{ inputs.kernel_branch }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ inputs.board }} ${{ inputs.release }} ${{ inputs.kernel_branch }}
+    # Native arm64 runner (free for public repositories): no qemu emulation needed.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 350
+    env:
+      BOARD: ${{ inputs.board }}
+      RELEASE: ${{ inputs.release }}
+      KERNEL_BRANCH: ${{ inputs.kernel_branch }}
+      BUILD_MINIMAL: ${{ inputs.build_minimal && 'yes' || 'no' }}
+      DEVUAN_KEY_FINGERPRINTS: ${{ vars.DEVUAN_KEY_FINGERPRINTS }}
+      # Devuan-only repository (holds devuan-keyring) and the merged archive the image is built from.
+      DEVUAN_POOL_BASE: https://pkgmaster.devuan.org/devuan
+      DEVUAN_MERGED_BASE: http://deb.devuan.org/merged
+      CACHE_PREFIX: pivuan-arm64-${{ inputs.board }}-${{ inputs.release }}
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          df -h /
+          # Preinstalled SDKs the build doesn't use. Missing paths are fine.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift /opt/microsoft /opt/google \
+            /usr/local/lib/node_modules /usr/local/share/powershell /usr/local/share/chromium || true
+          sudo docker image prune --all --force > /dev/null 2>&1 || true
+          sudo apt-get clean
+          df -h /
+
+      - name: Fetch and verify Devuan archive keyring
+        id: keyring
+        run: |
+          set -euo pipefail
+          work="${RUNNER_TEMP}/devuan-keyring"
+          mkdir -p "${work}"
+          cd "${work}"
+          export GNUPGHOME="${work}/gnupg"
+          mkdir -m 700 "${GNUPGHOME}"
+
+          # 1. Locate devuan-keyring in the Devuan-only repository and check its SHA256 from the index.
+          curl -fsSL --retry 3 "${DEVUAN_POOL_BASE}/dists/${RELEASE}/main/binary-arm64/Packages.xz" -o Packages.xz
+          entry="$(xz -dc Packages.xz | awk 'BEGIN { RS = ""; FS = "\n" } $1 == "Package: devuan-keyring" { print; exit }')"
+          filename="$(sed -n 's/^Filename: //p' <<< "${entry}")"
+          sha256="$(sed -n 's/^SHA256: //p' <<< "${entry}")"
+          if [[ -z "${filename}" || -z "${sha256}" ]]; then
+            echo "::error::devuan-keyring not found in ${DEVUAN_POOL_BASE} ${RELEASE} Packages index"
+            exit 1
+          fi
+          curl -fsSL --retry 3 "${DEVUAN_POOL_BASE}/${filename}" -o devuan-keyring.deb
+          echo "${sha256}  devuan-keyring.deb" | sha256sum -c -
+          dpkg-deb -x devuan-keyring.deb extracted
+          full="${work}/extracted/usr/share/keyrings/devuan-archive-keyring.gpg"
+          if [[ ! -f "${full}" ]]; then
+            echo "::error::devuan-keyring package has no usr/share/keyrings/devuan-archive-keyring.gpg"
+            exit 1
+          fi
+
+          # 2. Check which keys sign the two archives the build uses.
+          normalize() { tr '[:lower:],' '[:upper:] ' | tr -s ' \t' '\n' | grep -v '^$' || true; }
+          pinned="$(normalize <<< "${DEVUAN_KEY_FINGERPRINTS}")"
+          declare -a all_signers=()
+          for base in "${DEVUAN_POOL_BASE}" "${DEVUAN_MERGED_BASE}"; do
+            curl -fsSL --retry 3 "${base}/dists/${RELEASE}/InRelease" -o InRelease
+            if ! status="$(gpgv --status-fd 1 --keyring "${full}" InRelease 2> gpgv.err)"; then
+              cat gpgv.err
+              echo "::error::${base}/dists/${RELEASE}/InRelease does not verify with devuan-archive-keyring"
+              exit 1
+            fi
+            # VALIDSIG ... <primary key fingerprint> is the last field.
+            signers="$(awk '$2 == "VALIDSIG" { print $NF }' <<< "${status}")"
+            echo "${base} signed by: ${signers}"
+            # shellcheck disable=SC2206 # one fingerprint per word
+            all_signers+=(${signers})
+            if [[ -n "${pinned}" ]] && ! grep -qxFf <(echo "${pinned}") <<< "${signers}"; then
+              echo "::error::${base} is not signed by any key in DEVUAN_KEY_FINGERPRINTS"
+              exit 1
+            fi
+          done
+
+          # 3. Hand the build a keyring holding only the pinned keys, or (unpinned) the whole package keyring.
+          out="${work}/devuan-archive-keyring.gpg"
+          if [[ -n "${pinned}" ]]; then
+            # shellcheck disable=SC2086
+            gpg --batch --no-default-keyring --keyring "${full}" --export ${pinned} > "${out}"
+            [[ -s "${out}" ]] || { echo "::error::none of DEVUAN_KEY_FINGERPRINTS are in devuan-archive-keyring"; exit 1; }
+            trust="pinned by DEVUAN_KEY_FINGERPRINTS"
+          else
+            cp "${full}" "${out}"
+            trust="**not pinned** (trust on first use)"
+            echo "::warning::DEVUAN_KEY_FINGERPRINTS is not set; using the downloaded Devuan keyring unpinned. See the run summary."
+          fi
+
+          {
+            echo "## Devuan archive keyring"
+            echo ""
+            echo "- Package: \`${filename}\` (SHA256 matched the ${RELEASE} index)"
+            echo "- Archive signers: \`$(printf '%s\n' "${all_signers[@]}" | sort -u | tr '\n' ' ')\`"
+            echo "- Trust: ${trust}"
+            echo ""
+            echo "Keys given to the build (compare with \`gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg\` on your Devuan machine, then put the fingerprint(s) in the repository variable \`DEVUAN_KEY_FINGERPRINTS\`):"
+            echo ""
+            echo '```'
+            gpg --batch --show-keys --with-fingerprint "${out}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          echo "file=${out}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore build cache
+        if: inputs.use_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            output/debs
+            output/packages-hashed
+            cache/rootfs
+          key: ${{ env.CACHE_PREFIX }}-${{ inputs.kernel_branch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ env.CACHE_PREFIX }}-${{ inputs.kernel_branch }}-
+            ${{ env.CACHE_PREFIX }}-
+
+      - name: Build image
+        run: |
+          set -euo pipefail
+          # PREFER_DOCKER=no: build natively (compile.sh re-runs itself with sudo) so the
+          # cached directories and the keyring path are plain host paths.
+          ./compile.sh build \
+            BOARD="${BOARD}" \
+            BRANCH="${KERNEL_BRANCH}" \
+            RELEASE="${RELEASE}" \
+            BUILD_MINIMAL="${BUILD_MINIMAL}" \
+            BUILD_DESKTOP=no \
+            KERNEL_CONFIGURE=no \
+            EXPERT=yes \
+            PREFER_DOCKER=no \
+            COMPRESS_OUTPUTIMAGE=sha,xz \
+            DEVUAN_KEYRING_FILE="${{ steps.keyring.outputs.file }}"
+
+      - name: Prune caches and fix ownership
+        if: always() && inputs.use_cache
+        run: |
+          mkdir -p output/debs output/packages-hashed cache/rootfs
+          sudo chown -R "$(id -u):$(id -g)" output/debs output/packages-hashed cache/rootfs
+          # Drop packages not rebuilt for 30 days, and keep only the two newest rootfs tarballs.
+          find output/debs output/packages-hashed -type f -mtime +30 -delete
+          find cache/rootfs -maxdepth 1 -name '*.tar.zst' -printf '%T@ %p\n' | sort -rn | tail -n +3 | cut -d' ' -f2- | xargs -r rm -fv
+          du -sh output/debs output/packages-hashed cache/rootfs
+
+      - name: Save build cache
+        if: always() && inputs.use_cache
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            output/debs
+            output/packages-hashed
+            cache/rootfs
+          key: ${{ env.CACHE_PREFIX }}-${{ inputs.kernel_branch }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: pivuan-${{ inputs.board }}-${{ inputs.release }}-${{ inputs.kernel_branch }}-${{ github.run_number }}
+          path: |
+            output/images/*.img.xz
+            output/images/*.img.xz.sha
+            output/images/*.txt
+          if-no-files-found: error
+          compression-level: 0 # already xz-compressed
+          retention-days: 14
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pivuan-logs-${{ inputs.board }}-${{ inputs.release }}-${{ inputs.kernel_branch }}-${{ github.run_number }}
+          path: output/logs
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Image"
+            echo ""
+            if ls output/images/*.img.xz > /dev/null 2>&1; then
+              echo '```'
+              ls -lh output/images/*.img.xz
+              echo '```'
+              echo "Download it from the **Artifacts** section of this run, then flash the .img.xz (e.g. with balenaEtcher or \`xzcat … | sudo dd of=/dev/sdX bs=4M conv=fsync\`)."
+            else
+              echo "No image was produced. See the **pivuan-logs** artifact."
+            fi
+            echo ""
+            df -h / | sed 's/^/    /'
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -62,6 +62,8 @@ function do_main_configuration() {
 	fi
 
 	# Armbian image is set as unofficial if build manually or without declaring from outside
+	# This fork's Devuan images are called Pivuan (image file names, motd, /etc/issue).
+	[[ -z $VENDOR ]] && is_devuan_release "${RELEASE}" && VENDOR="Pivuan"
 	[[ -z $VENDOR ]] && VENDOR="Armbian-unofficial"
 
 	# Use framework defaults for community Armbian images and unsupported distribution when building Armbian distribution
