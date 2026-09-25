@@ -436,6 +436,13 @@ Written in this fork and checked offline (`sh -n`/`bash -n`, shellcheck with no 
 | `lib/functions/rootfs/distro-agnostic.sh` | sysvinit serial getty line becomes `/bin/sh -c '[ -e /dev/<tty> ]\|\|exec sleep 1d;exec /sbin/getty …'` (only when it fits init's 127-character limit), so a missing device no longer makes init respawn getty in a loop |
 | `config/distributions/excalibur/support` | `csc` → `supported` |
 
+**First Phase 2 boot (commit `aacc861`) failed:** the resize printed partition tables on the console during boot, then boot hung at "Armbian first run tasks" and never reached the wizard. The cause was that the init scripts ran the jobs in the foreground with the console as stdin/stdout, whereas systemd runs them without a terminal and in parallel with the login prompt. `armbian-resize-filesystem` tees its report to stdout, so it went to the screen. `armbian-firstrun` runs `dpkg-reconfigure openssh-server > /dev/null`: with a terminal on stdin, debconf opened its interactive dialog for the openssh questions, invisibly, and waited for keyboard input forever. The printed `mmcblk…` name is only the resize script's report; it renames nothing, and root is mounted by label/UUID.
+
+**Fix:**
+- `armbian-firstrun` and `armbian-resize-filesystem` start with `setsid -f … < /dev/null >> /run/armbian-init.log 2>&1`, so they run in the background with no terminal and boot goes straight to the login and wizard. `DEBIAN_FRONTEND=noninteractive` is exported in both, and `armbian-firstrun` also sets it on its `dpkg-reconfigure` call.
+- The `rcS` jobs (zram, ramlog, hardware monitor/optimize, LED state) stay in the foreground for ordering, with output to `/run/armbian-init.log` instead of the console.
+- To rescue a card stuck at this point, re-flash it. Pressing Enter a few times at the hung console probably also works: it accepts debconf's hidden defaults.
+
 **Check on the Pi 5 after the next build:**
 
 ```sh
@@ -447,5 +454,8 @@ gpioinfo | head                           # works without sudo as the new user
 zramctl; findmnt /var/log                 # zram swap, /var/log on zram
 grep autologin /etc/inittab               # nothing, after first login
 rfkill list                               # Wi-Fi/Bluetooth not soft-blocked
+lsblk                                     # SD card device name (mmcblk0 expected)
+ls -l /etc/ssh/ssh_host_*                 # created at first boot, not at build time
+cat /run/armbian-init.log                 # output of the Armbian init scripts; no errors
 ```
 

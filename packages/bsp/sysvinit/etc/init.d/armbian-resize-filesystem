@@ -12,6 +12,8 @@
 # Shipped in the BSP only when the image is built with INIT_SYSTEM=sysvinit.
 
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Never let debconf (e.g. dpkg-reconfigure openssh-server) wait for answers on a console.
+export DEBIAN_FRONTEND=noninteractive
 PROG=/usr/lib/armbian/armbian-resize-filesystem
 
 [ -x "${PROG}" ] || exit 0
@@ -21,9 +23,10 @@ PROG=/usr/lib/armbian/armbian-resize-filesystem
 
 case "$1" in
 	start)
-		log_action_begin_msg "Armbian filesystem resize"
-		"${PROG}" start
-		log_action_end_msg $?
+		# As with the systemd unit: run in the background, detached from the console, so the boot and the
+		# login prompt don't wait for it and nothing can prompt or print on the console. It keeps its own log.
+		setsid -f "${PROG}" start < /dev/null >> /run/armbian-init.log 2>&1
+		log_action_msg "Armbian filesystem resize started in the background"
 		;;
 	stop | restart | force-reload)
 		# Nothing to undo: this only runs once at boot.

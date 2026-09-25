@@ -17,13 +17,15 @@ PROG=/usr/lib/armbian/armbian-hardware-optimization
 
 [ -x "${PROG}" ] || exit 0
 
+# Output goes to /run/armbian-init.log, not the console (under systemd it goes to the journal).
+
 # shellcheck source=/dev/null
 . /lib/lsb/init-functions
 
 case "$1" in
 	start)
 		log_action_begin_msg "Armbian hardware optimization"
-		"${PROG}" start
+		"${PROG}" start < /dev/null >> /run/armbian-init.log 2>&1
 		log_action_end_msg $?
 		;;
 	stop | restart | force-reload)

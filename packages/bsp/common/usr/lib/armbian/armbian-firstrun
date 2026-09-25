@@ -49,7 +49,7 @@ case "$1" in
 	if [[ "${OPENSSHD_REGENERATE_HOST_KEYS}" = true ]]; then
 		rm -f /etc/ssh/ssh_host*
 		read entropy_before </proc/sys/kernel/random/entropy_avail
-		dpkg-reconfigure openssh-server >/dev/null 2>&1
+		DEBIAN_FRONTEND=noninteractive dpkg-reconfigure openssh-server >/dev/null 2>&1
 		service ssh restart
 		read entropy_after </proc/sys/kernel/random/entropy_avail
 		echo -e "\n### [firstrun] Recreated SSH keys (entropy: ${entropy_before} ${entropy_after})" >>${Log}
