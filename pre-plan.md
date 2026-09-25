@@ -443,6 +443,11 @@ Written in this fork and checked offline (`sh -n`/`bash -n`, shellcheck with no 
 - The `rcS` jobs (zram, ramlog, hardware monitor/optimize, LED state) stay in the foreground for ordering, with output to `/run/armbian-init.log` instead of the console.
 - To rescue a card stuck at this point, re-flash it. Pressing Enter a few times at the hung console probably also works: it accepts debconf's hidden defaults.
 
+**Second Phase 2 boot (commit `2d205b1`):** boot was fast and reached the wizard (Pivuan branding, root password, user). Two problems:
+- "Press Enter to start the first login setup" appeared first. Current `armbian-firstlogin` waits for Enter on every autologin console, and the sysvinit inittab had root autologin on tty1–tty6 plus serial. **Fix:** autologin only on the tty1 inittab line (plus serial, as under systemd), and no Enter wait on `/dev/tty1`. Other consoles still wait, and the existing lock keeps the wizard to one console.
+- After the user was created, the screen went blank with the cursor top-left until Ctrl-C. The end of the wizard runs `clear` and then `run-parts /etc/cron.daily` in the foreground. apt's `apt-compat` job exits at once under systemd, but under sysvinit it first sleeps a random time of up to 30 minutes. **Fix:** without systemd, run only `/etc/cron.daily/armbian-*` there (`run-parts --regex '^armbian-'`); cron runs the rest. Ctrl-C lost nothing: `FIRSTLOGIN_SUCCESS=1` is set before that point.
+- `cron.daily/armbian-ram-logging` no longer prints "systemctl: not found" on sysvinit.
+
 **Check on the Pi 5 after the next build:**
 
 ```sh

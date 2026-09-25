@@ -142,9 +142,9 @@ function install_distribution_agnostic() {
 
 	# enable automated login to console(s)
 	if [[ $CONSOLE_AUTOLOGIN == yes && "${INIT_SYSTEM}" == "sysvinit" ]]; then
-		# sysvinit: gettys are spawned from /etc/inittab. Add --autologin to the tty1..6 lines
-		# (agetty accepts it; serial lines added below get it too).
-		sed -E -i 's#^([1-6]:[0-9]+:respawn:/sbin/getty) #\1 --noissue --autologin root #' "${SDCARD}"/etc/inittab
+		# sysvinit: gettys are spawned from /etc/inittab. Add --autologin to the tty1 line only, like systemd
+		# where only tty1 (and serial consoles, added below) log in automatically for the first-login setup.
+		sed -E -i 's#^(1:[0-9]+:respawn:/sbin/getty) #\1 --noissue --autologin root #' "${SDCARD}"/etc/inittab
 	elif [[ $CONSOLE_AUTOLOGIN == yes ]]; then
 		mkdir -p "${SDCARD}"/etc/systemd/system/getty@.service.d/
 		mkdir -p "${SDCARD}"/etc/systemd/system/serial-getty@.service.d/

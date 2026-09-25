@@ -815,7 +815,8 @@ if [[ -f /root/.not_logged_in_yet ]] && tty -s; then
 
 	# most autologin consoles have nobody at them, so wait for Enter;
 	# a preset run has nobody to wait for, an ssh login already has a user
-	if [[ -z "${PRESET_ROOT_PASSWORD}${PRESET_CONFIGURATION}${SSH_CONNECTION}" ]]; then
+	# The main console (tty1, HDMI) starts the setup right away; the lock below keeps other consoles out.
+	if [[ -z "${PRESET_ROOT_PASSWORD}${PRESET_CONFIGURATION}${SSH_CONNECTION}" && "$(tty)" != /dev/tty1 ]]; then
 		echo -e "\nPress Enter to start the first login setup on this console."
 		until read -r -t 1 _; do
 			(($? > 128)) || exit 0 # not a timeout: the terminal is gone
@@ -1268,7 +1269,13 @@ if [[ -f /root/.not_logged_in_yet ]] && tty -s; then
 	else
 		# no display manager detected -> clear screen and show motd
 		clear
-		run-parts --lsbsysinit /etc/cron.daily
+		if armbian_is_systemd; then
+			run-parts --lsbsysinit /etc/cron.daily
+		else
+			# Without systemd, apt's cron.daily job (apt-compat) first sleeps up to 30 minutes, which would
+			# leave a blank screen here. Run only Armbian's own quick jobs; cron runs the rest daily.
+			run-parts --regex '^armbian-' /etc/cron.daily
+		fi
 		run-parts --lsbsysinit /etc/update-motd.d
 
 		# Display reboot recommendation if necessary
