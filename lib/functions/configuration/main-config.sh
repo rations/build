@@ -97,7 +97,12 @@ function do_main_configuration() {
 	declare -g USE_CCACHE="${USE_CCACHE:-no}" # stop using ccache as our worktree is more effective
 
 	# Armbian config is central tool used in all builds. As its build externally, we have moved it to extension. Enable it here.
-	enable_extension "armbian-config"
+	# Devuan (Pivuan) images get pivuan-config instead: the same tool from the configng fork, without systemd.
+	if is_devuan_release "${RELEASE}"; then
+		enable_extension "pivuan-config"
+	else
+		enable_extension "armbian-config"
+	fi
 
 	# Fix binman pkg_resources removal in setuptools >= 82. Can be removed when all U-Boot versions are >= v2025.10.
 	enable_extension "uboot-binman-fix-pkg-resources"

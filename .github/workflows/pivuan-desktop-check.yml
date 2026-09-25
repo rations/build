@@ -1,0 +1,114 @@
+# Check that a pivuan-config desktop install resolves on Devuan without systemd.
+#
+# Runs in the official Devuan container (amd64 only on Docker Hub): parses the
+# desktop package list the way pivuan-config does for excalibur/arm64, then
+#   1. simulates the install (apt-get -s, no recommends, as on the image) on top
+#      of the Pivuan base stack (sysvinit, elogind, eudev, ifupdown), and fails if
+#      systemd or systemd-sysv would be installed or apt cannot resolve it;
+#   2. checks every package also exists for arm64 in the Devuan archive;
+#   3. does the same for the pivuan-config package's own dependencies.
+
+name: Pivuan desktop package check
+
+on:
+  workflow_dispatch:
+    inputs:
+      configng_ref:
+        description: "rations/configng branch or tag"
+        type: string
+        default: claude/loving-fermi-gp2uoo
+      desktop:
+        description: "Desktop (YAML name)"
+        type: string
+        default: xfce
+      tier:
+        description: "Tier"
+        type: choice
+        options: [minimal, mid, full]
+        default: minimal
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ inputs.desktop }} ${{ inputs.tier }} on excalibur
+    runs-on: ubuntu-24.04
+    container: devuan/devuan:excalibur
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Prepare Devuan container
+        run: |
+          set -eu
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends git ca-certificates python3 python3-yaml
+          # The Pivuan base stack the desktop is installed on top of.
+          apt-get install -y -q --no-install-recommends sysvinit-core sysv-rc orphan-sysvinit-scripts eudev \
+            elogind libpam-elogind dbus ifupdown isc-dhcp-client wpasupplicant chrony sudo
+
+      - name: Fetch configng
+        run: git clone --depth 1 --branch "${{ inputs.configng_ref }}" https://github.com/rations/configng.git configng
+
+      - name: Resolve package list
+        id: list
+        run: |
+          set -eu
+          d=configng/tools/modules/desktops
+          python3 "$d/scripts/parse_desktop_yaml.py" "$d/yaml" "${{ inputs.desktop }}" excalibur arm64 --tier "${{ inputs.tier }}" > parsed.sh
+          . ./parsed.sh
+          echo "Packages: ${DESKTOP_PACKAGES} ${DESKTOP_DM}"
+          echo "${DESKTOP_PACKAGES} ${DESKTOP_DM}" | tr ' ' '\n' | grep -v '^$' | sort -u > packages.txt
+          # pivuan-config's own dependencies (tools/pivuan/build-deb.sh control file)
+          sed -n 's/^Depends: //p' configng/tools/pivuan/build-deb.sh | tr ',' '\n' | sed 's/ //g' | grep -v '^$' > config-deps.txt
+          wc -l packages.txt config-deps.txt
+
+      - name: Simulate install (amd64)
+        run: |
+          set -eu
+          fail=0
+          for list in packages.txt config-deps.txt; do
+            echo "::group::apt-get -s install $(wc -l < "$list") packages from $list"
+            mapfile -t pkgs < "$list"
+            if ! apt-get -s -y --no-install-recommends install "${pkgs[@]}" > "sim-$list" 2>&1; then
+              cat "sim-$list"
+              echo "::error::apt cannot resolve the packages in $list"
+              fail=1
+            fi
+            grep '^Inst ' "sim-$list" | awk '{print $2}' | sort > "inst-$list" || true
+            echo "$(wc -l < "inst-$list") packages would be installed"
+            echo "::endgroup::"
+            if grep -xE 'systemd|systemd-sysv' "inst-$list"; then
+              echo "::error::installing $list would pull in systemd:"
+              grep -E '^Inst systemd(-sysv)? ' "sim-$list"
+              fail=1
+            fi
+          done
+          {
+            echo "## ${{ inputs.desktop }} (${{ inputs.tier }}) on Devuan excalibur"
+            echo ""
+            echo "- Desktop packages requested: $(wc -l < packages.txt), new packages installed: $(wc -l < inst-packages.txt)"
+            echo "- pivuan-config dependencies: $(wc -l < config-deps.txt), new packages installed: $(wc -l < inst-config-deps.txt)"
+            echo "- systemd pulled in: $(grep -cxE 'systemd|systemd-sysv' inst-packages.txt inst-config-deps.txt | awk -F: '{s+=$2} END {print (s ? "YES" : "no")}')"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $fail
+        shell: bash
+
+      - name: Check arm64 availability
+        run: |
+          set -eu
+          dpkg --add-architecture arm64
+          apt-get update -q
+          missing=""
+          mapfile -t all < <(sort -u packages.txt config-deps.txt)
+          for p in "${all[@]}"; do
+            # Architecture: all packages are listed under the native arch as well
+            apt-cache show "$p:arm64" > /dev/null 2>&1 || apt-cache show "$p" 2>/dev/null | grep -q '^Architecture: all' || missing="$missing $p"
+          done
+          if [[ -n "$missing" ]]; then
+            echo "::error::not available for arm64:$missing"
+            echo "- Missing on arm64:$missing" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "- All packages available for arm64" >> "$GITHUB_STEP_SUMMARY"
+        shell: bash

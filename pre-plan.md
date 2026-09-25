@@ -464,3 +464,32 @@ ls -l /etc/ssh/ssh_host_*                 # created at first boot, not at build 
 cat /run/armbian-init.log                 # output of the Armbian init scripts; no errors
 ```
 
+---
+
+## 13. Phase 3 implementation status (configng → pivuan-config)
+
+Code written in `rations/configng` (branch `claude/loving-fermi-gp2uoo`) and wired into this build. **Not yet run on a Pi.**
+
+| Where | Change |
+|---|---|
+| configng `tools/modules/functions/module_service.sh` | `srv_*` helpers: `service` / `update-rc.d` when not booted with systemd. `NetworkManager` → `network-manager`, `display-manager` → the DM in `/etc/X11/default-display-manager` |
+| configng `tools/modules/desktops/module_desktops.sh` | Display-manager control through `srv_*`. On sysvinit the DM is enabled and started directly, and **no desktop autologin** is configured (lightdm shows its login screen; `module_desktops auto` can still turn it on). Networking: ifupdown's `interfaces.d` stanzas are moved to `*.pre-networkmanager` (ignored by ifupdown; rename back to undo), a first-login Wi-Fi network becomes a NetworkManager keyfile, and NetworkManager is enabled and restarted. No netplan or systemd-resolved |
+| configng `tools/modules/desktops/scripts/parse_desktop_yaml.py` | Devuan codenames use their Debian base release (`excalibur` → `trixie`, `daedalus` → `bookworm`, `freia` → `forky`, `ceres` → `sid`), then top-level `devuan:` blocks |
+| configng `yaml/common.yaml`, `yaml/xfce.yaml` | `devuan:` drops `netplan.io` and `profile-sync-daemon`; XFCE on Devuan uses PulseAudio instead of PipeWire (no systemd user session to start PipeWire). XFCE no longer installs `terminator` (it has `xfce4-terminal`) |
+| configng branding | Title `pivuan-config`, backtitle with the Pivuan project URL, XFCE panel menu button uses `/usr/share/pixmaps/pivuan/pivuan.png` (red badge with a white π), menu entry "Pivuan Config" |
+| configng `tools/pivuan/build-deb.sh` (new) | Builds `pivuan-config_<date>+g<commit>_all.deb`: `/usr/bin/pivuan-config`, no `systemd` dependency (uses `sysvinit-utils`, `init-system-helpers`), no Armbian apt source, `Conflicts/Replaces: armbian-config` |
+| `extensions/pivuan-config.sh` (new) | Enabled for Devuan releases instead of `armbian-config`. At image build it fetches `PIVUAN_CONFIG_REPO` / `PIVUAN_CONFIG_BRANCH`, runs `build-deb.sh` and installs the package with apt |
+| `packages/bsp/common/etc/update-motd.d/41-commands` | Shows `pivuan-config` as the configuration command when it is installed |
+| `.github/workflows/pivuan-desktop-check.yml` (new) | In the Devuan excalibur container: simulates the desktop install on top of the Pivuan base stack and fails if `systemd`/`systemd-sysv` would be installed; checks every package exists for arm64 |
+
+**Still Armbian-branded after an XFCE install** (not asked for yet): wallpapers, the lightdm greeter background and logo, and browser homepage/bookmark policies.
+
+**Install on an existing Pivuan system without reflashing:**
+
+```sh
+apt install git jq python3-yaml
+git clone -b claude/loving-fermi-gp2uoo https://github.com/rations/configng
+cd configng && tools/pivuan/build-deb.sh && apt install ./output/pivuan-config_*.deb
+pivuan-config            # System → Desktops → XFCE
+```
+
