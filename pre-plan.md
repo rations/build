@@ -173,8 +173,8 @@ Where the framework runs `systemctl`, add an init-aware helper so the Debian and
 | `:23-42` | Kernel `raspberrypi/linux` `rpi-6.18.y` (current). The config has `CONFIG_PINCTRL_BCM2712`, `CONFIG_MFD_RP1`, `CONFIG_BCM2712_IOMMU` | **Nothing.** Reuse as is. A Raspberry Pi fork kernel is required for RP1 on the Pi 5 |
 | `:90` | The `z51-raspi-firmware` postinst hook exits only on `^ID=debian` | Also exit on `ID=devuan` **if** Devuan's `raspi-firmware` is installed. Otherwise leave it active (in-BSP firmware path) |
 | `:241-257` | With `SKIP_ARMBIAN_REPO=yes`, firmware is copied from `salsa.debian.org/debian/raspi-firmware` into the BSP | Keep this. It is init-agnostic |
-| `:259-288` | Pi packages. The Debian branch installs `raspberrypi-sys-mods` from apt.armbian.com | Add a `Devuan` branch: `firmware-brcm80211 firmware-misc-nonfree bluez-firmware bluetooth` (optionally `rpi-eeprom`). **Never `raspberrypi-sys-mods`**, which has `Depends: systemd (>= 230)` |
-| `:290-308` | `unblock-rfkill.service` + `systemctl enable` | Ship `/etc/init.d/unblock-rfkill` (or a `/etc/rc.local` line; `install_rclocal` already exists in `distro-specific.sh:84`) |
+| `:259-288` | Pi packages. The Debian branch installs `raspberrypi-sys-mods` and `raspi-config` from apt.armbian.com | Add a `Devuan` branch: `firmware-brcm80211 firmware-misc-nonfree bluez-firmware bluetooth` (optionally `rpi-eeprom`). **Do not install `raspberrypi-sys-mods`** (`Depends: systemd (>= 230)`) or `raspi-config` (47 `systemctl` calls; armbian-config replaces it). Ship the useful sys-mods files in the BSP instead (§5.3) |
+| `:290-308` | `unblock-rfkill.service` + `systemctl enable` | Probably **not needed** on Devuan: the radio soft-block it undoes comes from sys-mods' `modprobe.d/rfkill_default.conf`, which §5.3 leaves out. Check on the Pi (`rfkill list`). If radios still start blocked, ship `/etc/init.d/unblock-rfkill` (or a `/etc/rc.local` line; `install_rclocal` already exists in `distro-specific.sh:84`) |
 | `:318-386` | `config.txt` / `cmdline.txt` | Nothing systemd-specific. `kernel=vmlinuz` avoids the 16K-page `kernel_2712.img` issue |
 
 **Build host**
@@ -189,6 +189,61 @@ Where the framework runs `systemctl`, add an init-aware helper so the Debian and
 `extension_prepare_config` → `custom_apt_repo` → `pre_install_distribution_specific` → `post_family_tweaks_bsp` → `post_family_tweaks` → `post_customize_image` → `post_post_debootstrap_tweaks` (the last chance to fix `resolv.conf`) → `pre_umount_final_image`.
 
 Put Devuan-only logic in `extensions/devuan.sh` wherever a hook can reach it. Make core `lib/` edits only where no hook exists (distribution detection, keyring, sources, and the systemctl call sites).
+
+### 5.3 `raspberrypi-sys-mods`: copy the useful files into the BSP instead of installing the package
+
+**Decision:** on Devuan, do not install the `raspberrypi-sys-mods` package. Copy the init-agnostic files that matter into the Armbian BSP package at build time. This avoids maintaining a third fork, avoids clashing with Armbian's own first-run and resize scripts, and drops the `systemd` dependency.
+
+**Source examined:** `https://github.com/RPi-Distro/raspberrypi-sys-mods`, branch `pios/trixie`, commit `7959bb7a3d6ffa298096745d3e5efdf976e33b9a` (release `1:20260914`). The copy in apt.armbian.com may be a different version; that has not been checked.
+
+**Why the package can't be used as is**
+
+- `debian/control`: `Depends: … systemd (>= 230), … raspi-config (>= 20220809), …`
+- `debian/rules`: `dh_installsystemd` for `regenerate_ssh_host_keys`, `sshswitch` and `rpi-resize`.
+- `raspi-config` has no systemd dependency in its package metadata, but its script calls `systemctl` 47 times.
+
+**Keep: copy into the BSP (none of these need systemd)**
+
+| File (in the sys-mods repo) | What it does | Installed to |
+|---|---|---|
+| `usr/lib/udev/rules.d/99-com.rules` | `/dev/serial0`, `/dev/serial1` symlinks (includes the Pi 5 RP1 UART cases). Groups for `input`, `i2c-dev`, `spidev`, `gpio`, `*gpiomem*`, `pwm`, `rpivid-*` | `/usr/lib/udev/rules.d/` |
+| `usr/lib/udev/rules.d/10-vc.rules` | `video` group on `vchiq`, `vcio`, `vcsm-cma` (VideoCore, camera) | same |
+| `usr/lib/udev/rules.d/60-dma-heap.rules` | `video` group on `dma_heap`, plus the `vidbuf_cached` symlink (camera and hardware video decode) | same |
+| `usr/lib/udev/rules.d/60-gpiochip4.rules` | Pi 5: `/dev/gpiochip4` compatibility symlink, which older GPIO code expects | same |
+| `usr/lib/udev/rules.d/60-piolib.rules` | Pi 5: `gpio` group on the RP1 PIO device | same |
+| `usr/lib/udev/rules.d/60-i2c-aliases.rules` | `/dev/i2c-*` symlinks named after the device-tree node | same |
+| `usr/lib/udev/rules.d/15-i2c-modprobe.rules` + `usr/lib/raspberrypi-sys-mods/i2cprobe` | Loads drivers for I²C and SPI devices declared in overlays. The rule calls the helper script, so ship both | rules dir, and `/usr/lib/raspberrypi-sys-mods/` |
+| `usr/lib/udev/rules.d/60-backlight.rules` | `video` group can write the DSI backlight brightness | rules dir |
+| `usr/lib/udev/rules.d/60-picotool.rules`, `70-microbit.rules` | Non-root access to Pico and micro:bit over USB | rules dir |
+| `usr/lib/udev/rules.d/86-rpi-trim.rules`, `87-usb-storage-maxsectors.rules` | TRIM on the Raspberry Pi USB stick; max-sector fix for old Broadcom USB storage | rules dir |
+| `initramfs-tools/hooks/rpi-sys-mods` | Adds `i2c-brcmstb` and `i2c-bcm2835` to the initramfs | `/usr/share/initramfs-tools/hooks/` |
+| `initramfs-tools/scripts/init-top/rpi_wd` | Disarms the hardware watchdog in the initramfs unless `config.txt` asks for it. Nothing on sysvinit would keep feeding it, so this is wanted | `/usr/share/initramfs-tools/scripts/init-top/` |
+
+**Leave out**
+
+| File(s) | Reason |
+|---|---|
+| `debian/*.service` (`regenerate_ssh_host_keys`, `sshswitch`, `rpi-resize`), `usr/lib/raspberrypi-sys-mods/sshswitch` | systemd units. `armbian-firstrun` and `armbian-resize-filesystem` already do this |
+| `initramfs-tools/scripts/local-premount/resize_early`, `local-bottom/set_partuuid`, `hooks/firstboot` | Pi OS early resize. Duplicates `armbian-resize-filesystem`, and only runs with ` resize` on the kernel command line anyway |
+| `initramfs-tools/{hooks,scripts/local-bottom}/imager_fixup`, `usr/lib/raspberrypi-sys-mods/imager_custom` | Raspberry Pi Imager first-boot customisation (`systemd.run=`, `systemctl`) |
+| `usr/lib/systemd/**` (journald, timesyncd, `system.conf.d` watchdog, `system-generators/dpkg-limit`), `etc/profile.d/dpkg-limit.sh` | Only mean anything under systemd |
+| `usr/lib/tmpfiles.d/*.conf` | ondemand governor tunables and `/sys/kernel/debug` permissions. Armbian's `armbian-hardware-optimization` and the family `GOVERNOR` setting already handle cpufreq |
+| `etc/modprobe.d/rfkill_default.conf` | `options rfkill default_state=0` starts Wi-Fi and Bluetooth **blocked**. Pi OS unblocks them after the Wi-Fi country is set; Armbian works around it with `unblock-rfkill` |
+| `etc.armhf/*` (`98-rpi.conf` sysctl, 8192cu blacklist) | armhf only. The image is arm64 |
+| `usr/lib/python3.13/EXTERNALLY-MANAGED` | Pi OS pip policy; Devuan ships its own |
+| `etc/sudoers.d/010_*`, `etc/issue.d/IP.issue`, `etc/needrestart/conf.d/rpi-kernel.conf`, `etc/profile.d/at-dbus-fix.sh` | Pi OS desktop and user conventions. Not needed; can be revisited individually |
+| `usr/lib/udev/rules.d/61-drm.rules` (`TAG+="systemd"`), `60-ondemand-governor.rules`, `80-noobs.rules` | systemd device tagging; governor is set by Armbian; NOOBS is obsolete |
+
+**How to implement (Phase 2)**
+
+- In `config/sources/families/bcm2711.conf`, add a `post_family_tweaks_bsp__rpi_sys_mods_files` hook, active only when `DISTRIBUTION == Devuan`.
+- Reuse the pattern of `post_family_tweaks_bsp__rpi_firmware_in_bsp` (`bcm2711.conf:241-257`): `fetch_from_repo "https://github.com/RPi-Distro/raspberrypi-sys-mods.git" "rpi-sys-mods" "commit:<sha>" "yes"`, then copy **only the allow-listed files above** into `${destination}`. Keeping the SHA in the family file means bumping it rebuilds the BSP, just as it does for the firmware.
+- The udev rules assign the `gpio`, `i2c` and `spi` groups, but nothing in Armbian creates them, and udev falls back to root for groups that don't exist. Append to the BSP `postinst_functions` array: `addgroup --system gpio`, `i2c` and `spi` (skip each one if `getent group` finds it).
+- `armbian-firstlogin:723` adds the new user to a fixed list of groups. Add `gpio i2c spi` to it (the loop already ignores missing groups).
+- Run `update-initramfs -u` after the BSP is installed. The existing `initramfs/post-update.d/zzz-update-initramfs` hook then copies the result to `/boot/firmware`.
+- Serial console: with `/dev/serial0` provided by `99-com.rules`, the sysvinit `/etc/inittab` getty line can keep using `serial0`, as `SERIALCON` does today.
+- **Runtime tools the rules need:** the `serial%c` rule in `99-com.rules` calls `strings`, which comes from **`binutils`**. No Armbian package list includes it, so without it `/dev/serial0` is never created. Add `binutils` to the excalibur package list, or install it from the same hook. The other rules only use `sh`, `grep`, `test`, `chgrp`, `chmod` and `udevadm`, which are already in a minimal image.
+- Add `config/optional/architectures/arm64/_config/cli/excalibur/main/packages` containing `gpiod` (and `mtd-utils`, as trixie has), so `gpioinfo` is available.
 
 ### 5.2 `configng` (armbian-config, `XFCE01`)
 
@@ -230,13 +285,16 @@ Put Devuan-only logic in `extensions/devuan.sh` wherever a hook can reach it. Ma
 - Add `/etc/init.d/armbian-*` scripts and `unblock-rfkill`, and make the BSP postinst init-aware.
 - Patch `armbian-firstrun`, `armbian-resize-filesystem`, `armbian-ramlog`, `armbian-zram-config`, `armbian-truncate-logs` and `armbian-common`.
 - Patch `armbian-firstlogin`: ssh restart, timezone, network, DM.
-- Add the Devuan branch in `bcm2711.conf`. Never install `raspberrypi-sys-mods`.
+- Add the Devuan branch in `bcm2711.conf`. Do not install `raspberrypi-sys-mods` or `raspi-config`.
+- Ship the allow-listed `raspberrypi-sys-mods` files in the BSP (§5.3), create the `gpio`, `i2c` and `spi` groups, and add them to the first-login group list.
 - **Done when**, on the Pi 5:
   - the image boots to a console login on HDMI and on serial;
   - the root filesystem is resized;
   - the first-login wizard completes;
   - Ethernet gets DHCP and SSH works;
-  - `cat /proc/1/comm` prints `init`.
+  - `cat /proc/1/comm` prints `init`;
+  - `ls -l /dev/serial0 /dev/gpiochip4` shows both symlinks, `ls -l /dev/gpiochip* /dev/i2c-*` shows the `gpio` and `i2c` groups, and the first user can run `gpioinfo` without sudo;
+  - `rfkill list` shows Wi-Fi and Bluetooth not soft-blocked without the `unblock-rfkill` workaround (if they are blocked, add the init script from §5.1).
 
 ### Phase 3: `configng` on sysvinit
 - Add the sysvinit backend in `module_service.sh`.
@@ -273,7 +331,8 @@ Put Devuan-only logic in `extensions/devuan.sh` wherever a hook can reach it. Ma
 5. **Pi 5 kernel page size.** Armbian boots `vmlinuz` (4K pages) through `kernel=vmlinuz`. Keep it, so jemalloc and other software that breaks on 16K pages is unaffected.
 6. **Keyring distribution.** The vendored `devuan-archive-keyring.gpg` needs updating when Devuan rotates keys (each release).
 7. **Armbian apt repo.** It is disabled (`SKIP_ARMBIAN_REPO=yes`), so kernel and BSP updates on installed systems need a private apt repo, or manually built `.deb` files. Decide this in `plan.md`.
-8. **Future options.** openrc or runit support, and daedalus images. The Phase 1 helper (`chroot_sdcard_enable_service`) should use an `INIT_SYSTEM` variable, not a hard-coded sysvinit, so these can be added later.
+8. **`raspberrypi-sys-mods` drift.** Raspberry Pi changes these udev rules over time (for example, new Pi 5 or CM5 devices). The pinned SHA in `bcm2711.conf` has to be bumped by hand; check the repo's changelog when rebasing onto Armbian.
+9. **Future options.** openrc or runit support, and daedalus images. The Phase 1 helper (`chroot_sdcard_enable_service`) should use an `INIT_SYSTEM` variable, not a hard-coded sysvinit, so these can be added later.
 
 ---
 
