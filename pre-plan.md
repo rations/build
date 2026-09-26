@@ -515,3 +515,18 @@ pivuan-config            # System → Desktops → XFCE
 - **Images.** `extensions/pivuan-apt.sh` (Devuan only) writes `/etc/apt/sources.list.d/pivuan.sources` and `/usr/share/keyrings/pivuan-archive-keyring.gpg` at the very end of the image build (`pre_umount_final_image`), so building never needs the repository online. Installed systems: `apt update && apt full-upgrade`.
 - **Releases.** The published build's `.img.xz` and `.sha` become release `v<version>` in rations/pivuan.
 - **Secrets:** `PIVUAN_APT_SIGNING_KEY`, `PIVUAN_REPO_TOKEN` (see `.github/workflows/README.md`).
+
+## 16. Fixes after the second XFCE test
+
+The desktop install uses no Recommends, so several things a Debian XFCE gets through Recommends were missing.
+
+| Problem | Cause | Fix (configng unless noted) |
+|---|---|---|
+| No network icon; the panel's wlan plugin fails with `nm-connection-editor` not found | `network-manager-gnome` is only a Recommends | Added to `yaml/xfce.yaml` (`devuan:`) |
+| Shut down / restart from XFCE only logs out; LightDM's shutdown dialog hangs | elogind asks for an administrator password when it does not count the session as the active one, and there was no polkit agent to ask (`pkexec` missing too) | `xfce-polkit` and `pkexec` added; `branding/polkit/50-pivuan-power.rules` (installed on sysvinit to `/etc/polkit-1/rules.d/`) lets the LightDM greeter and local `sudo` users power off / reboot |
+| Pivuan background not set, not in the wallpaper picker | xfdesktop keys the background by monitor connector (`monitorHDMI-2/workspace0`), which `/etc/skel` can't know; the picker opens XFCE's own folder | `branding/xfce/pivuan-xfce-backdrop` (autostart, once per user) sets it for every connected monitor unless the user chose one; symlink in `/usr/share/backgrounds/xfce/`; one background for all workspaces |
+| Wi-Fi from the wizard not connected after the desktop install | (not reproduced) | Handover also stops ifupdown's `wpa_supplicant`, turns the radio on and marks the interfaces managed, and prints NetworkManager's device states |
+| `pivuan-config --doc` jq error | `--doc` was Armbian's README generator | Shows the Pivuan README (`tools/pivuan/README.md`, packaged as `/usr/share/doc/pivuan-config/README.md`), no sudo; the generator stays as `--api generate_readme` |
+| Wizard: "Please provide your real name" | | build: `armbian-firstlogin` asks "Add a name" |
+
+`pivuan-desktop-check.yml` has an `inspect` option: it installs the desktop for real in the Devuan container and prints polkit, PAM, elogind, autostart and wallpaper facts.
