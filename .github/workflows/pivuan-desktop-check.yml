@@ -140,11 +140,13 @@ jobs:
       - name: Install and inspect (no recommends, as on the image)
         if: ${{ inputs.inspect }}
         run: |
-          set -u
+          set +e -u
           printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d
           mapfile -t pkgs < <(cat packages.txt config-deps.txt)
           apt-get install -y -q --no-install-recommends "${pkgs[@]}" > install.log 2>&1 || { tail -50 install.log; echo "::warning::install failed"; }
           sec() { echo "::group::$1"; shift; "$@" 2>&1; echo "::endgroup::"; }
+          sec "logind seat dirs, elogind config" sh -c 'grep -rv "^#" /etc/elogind/logind.conf | grep -v "^$"; ls -la /etc/init.d/elogind /etc/rc*.d/*elogind*; grep -n "run/systemd" /usr/share/doc/elogind/README* 2>/dev/null | head -3; strings /usr/libexec/elogind/elogind 2>/dev/null | grep -E "^/run/systemd/(seats|sessions|users)" | sort -u'
+          sec "polkit rules shipped" sh -c 'for f in /usr/share/polkit-1/rules.d/* /etc/polkit-1/rules.d/*; do echo "== $f"; cat "$f"; done' 
           sec "installed: polkit, elogind, agents, applet" dpkg-query -W -f='${Package} ${Version} ${Status}\n' polkitd pkexec policykit-1 libpam-elogind elogind libpolkit-agent-1-0 xfce-polkit mate-polkit lxpolkit policykit-1-gnome polkit-kde-agent-1 lxqt-policykit network-manager-gnome consolekit
           sec "polkit agents available" apt-cache policy xfce-polkit mate-polkit lxpolkit policykit-1-gnome lxqt-policykit network-manager-gnome connman-gtk cmst
           sec "who recommends polkitd" sh -c 'apt-cache rdepends --installed polkitd; apt-cache show xfce4-session lightdm network-manager elogind | grep -E "^(Package|Version|Depends|Recommends|Suggests):"'
