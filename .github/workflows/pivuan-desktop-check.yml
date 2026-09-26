@@ -163,5 +163,6 @@ jobs:
           EOF'
           sec "xfce4-session xfconf defaults, xfdesktop backdrops" sh -c 'ls -la /usr/share/backgrounds /usr/share/backgrounds/* /usr/share/xfce4/backdrops 2>&1; find /etc/xdg/xfce4 -name "*.xml" | head; strings /usr/bin/xfdesktop | grep -iE "backdrop|backgrounds|\.(png|jpg|svg)$" | sort -u | head -20'
           sec "network-manager init script and NetworkManager.conf" sh -c 'ls -la /etc/init.d/network-manager /etc/rc2.d/*network* 2>&1; cat /etc/NetworkManager/NetworkManager.conf; ls /usr/share/dbus-1/system-services/'
+          sec "autostart entries (XFCE)" sh -c 'for f in /etc/xdg/autostart/*.desktop; do printf "%s: %s\n" "${f##*/}" "$(grep -E "^(Exec|OnlyShowIn|NotShowIn)=" "$f" | tr "\n" " ")"; done'
           sec "lightdm config" sh -c 'grep -v "^#" /etc/lightdm/lightdm.conf | grep -v "^$"; ls /etc/lightdm /usr/share/lightdm/lightdm.conf.d 2>&1'
         shell: bash
