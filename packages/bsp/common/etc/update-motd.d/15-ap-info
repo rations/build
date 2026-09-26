@@ -39,9 +39,17 @@ print_ap_line() {
     "$ssid" "${chan:-n/a}"
 }
 
-# detect active hostapd services
-if systemctl is-active --quiet hostapd.service \
-   || systemctl list-units 'hostapd@*.service' --state=active >/dev/null 2>&1; then
+# detect active hostapd services (without systemd, e.g. sysvinit: a running hostapd)
+_hostapd_active() {
+  if [[ -d /run/systemd/system ]]; then
+    systemctl is-active --quiet hostapd.service \
+      || systemctl list-units 'hostapd@*.service' --state=active >/dev/null 2>&1
+  else
+    pidof hostapd >/dev/null 2>&1
+  fi
+}
+
+if _hostapd_active; then
 
   # collect hostapd configs (classic and templated), skip non-existing
   confs=()

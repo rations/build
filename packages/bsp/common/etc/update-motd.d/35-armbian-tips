@@ -33,37 +33,47 @@ _json_get() {
 
 lines=()
 
-# 1) Optional quote: /etc/update-motd.d/quotes.txt lines like: YYYY-MM-DD|Some text...
-quotes="/etc/update-motd.d/quotes.txt"
-if [[ -f "$quotes" ]]; then
-  total=$(wc -l < "$quotes")
-  if [[ "$total" -gt 0 ]]; then
-    rline=$(( RANDOM % total + 1 ))
-    raw=$(sed -n "${rline}p" "$quotes")
-    due="${raw%%|*}"
-    qtext="${raw#*|}"
-    # show only if not expired or due is empty
-    today=$(date +%Y-%m-%d)
-    if [[ -z "$due" || "$today" < "$(date -d "$due" +%Y-%m-%d 2>/dev/null || echo 9999-12-31)" ]]; then
-      [[ -n "$qtext" ]] && lines+=("$qtext")
+# Not Armbian (e.g. Pivuan): no Armbian quotes or recommendations. Until a
+# desktop is installed (pivuan-config writes /etc/armbian/desktop/<de>.tier),
+# say how to install one.
+safe_source /etc/armbian-release
+if [[ -n "${VENDOR:-}" && "${VENDOR}" != Armbian* ]]; then
+  if command -v pivuan-config >/dev/null 2>&1 && ! compgen -G '/etc/armbian/desktop/*.tier' >/dev/null; then
+    lines+=("To install desktop run pivuan-config --cmd XFCE01")
+  fi
+else
+  # 1) Optional quote: /etc/update-motd.d/quotes.txt lines like: YYYY-MM-DD|Some text...
+  quotes="/etc/update-motd.d/quotes.txt"
+  if [[ -f "$quotes" ]]; then
+    total=$(wc -l < "$quotes")
+    if [[ "$total" -gt 0 ]]; then
+      rline=$(( RANDOM % total + 1 ))
+      raw=$(sed -n "${rline}p" "$quotes")
+      due="${raw%%|*}"
+      qtext="${raw#*|}"
+      # show only if not expired or due is empty
+      today=$(date +%Y-%m-%d)
+      if [[ -z "$due" || "$today" < "$(date -d "$due" +%Y-%m-%d 2>/dev/null || echo 9999-12-31)" ]]; then
+        [[ -n "$qtext" ]] && lines+=("$qtext")
+      fi
     fi
   fi
-fi
 
-# 2) One non-expired recommend_message (if defined)
-if [[ "$(declare -p recommend_messages 2>/dev/null)" == "declare -a"* ]]; then
-  today=$(date +%Y-%m-%d)
-  valid=()
-  for item in "${recommend_messages[@]}"; do
-    exp=$(_json_get expiration "$item")
-    [[ -z "$exp" || "$today" < "$exp" ]] && valid+=("$item")
-  done
-  if ((${#valid[@]})); then
-    pick=${valid[$RANDOM % ${#valid[@]}]}
-    msg=$(_json_get message "$pick")
-    url=$(_json_get url     "$pick")
-    [[ -n "$msg" ]] && lines+=("$msg")
-    [[ -n "$url" ]] && lines+=("$url")
+  # 2) One non-expired recommend_message (if defined)
+  if [[ "$(declare -p recommend_messages 2>/dev/null)" == "declare -a"* ]]; then
+    today=$(date +%Y-%m-%d)
+    valid=()
+    for item in "${recommend_messages[@]}"; do
+      exp=$(_json_get expiration "$item")
+      [[ -z "$exp" || "$today" < "$exp" ]] && valid+=("$item")
+    done
+    if ((${#valid[@]})); then
+      pick=${valid[$RANDOM % ${#valid[@]}]}
+      msg=$(_json_get message "$pick")
+      url=$(_json_get url     "$pick")
+      [[ -n "$msg" ]] && lines+=("$msg")
+      [[ -n "$url" ]] && lines+=("$url")
+    fi
   fi
 fi
 

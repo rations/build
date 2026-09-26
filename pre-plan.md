@@ -482,7 +482,7 @@ Code written in `rations/configng` (branch `claude/loving-fermi-gp2uoo`) and wir
 | `packages/bsp/common/etc/update-motd.d/41-commands` | Shows `pivuan-config` as the configuration command when it is installed |
 | `.github/workflows/pivuan-desktop-check.yml` (new) | In the Devuan excalibur container: simulates the desktop install on top of the Pivuan base stack and fails if `systemd`/`systemd-sysv` would be installed; checks every package exists for arm64 |
 
-**Still Armbian-branded after an XFCE install** (not asked for yet): wallpapers, the lightdm greeter background and logo, and browser homepage/bookmark policies.
+**Still Armbian-branded after an XFCE install:** Armbian homepage/bookmark policies for Chromium/Firefox (unused: Pivuan installs Brave). Wallpapers and greeter: see section 14.
 
 **Install on an existing Pivuan system without reflashing:**
 
@@ -493,3 +493,16 @@ cd configng && tools/pivuan/build-deb.sh && apt install ./output/pivuan-config_*
 pivuan-config            # System → Desktops → XFCE
 ```
 
+
+## 14. Phase 3 fixes after the first XFCE test
+
+| Where | Change |
+|---|---|
+| `lib/functions/configuration/main-config.sh` | Pivuan project URL (first-login wizard, motd, bug links) is `https://github.com/rations/pivuan` |
+| `update-motd.d/15-ap-info`, `25-containers-info` | Only show the Wi-Fi access point (hostapd) and Docker container lines; they asked `systemctl` whether those services run. Without systemd they check for a running `hostapd` / `dockerd` instead |
+| `update-motd.d/35-armbian-tips`, `cron.daily/armbian-quotes` | Non-Armbian images don't fetch or show Armbian's tips; Pivuan shows "To install desktop run pivuan-config --cmd XFCE01" until a desktop is installed |
+| configng `module_package.sh` | The apt progress gauge follows apt's `APT::Status-Fd` progress (download 0–50 %, install 50–100 %); upstream always sent 0 % |
+| configng `module_dialog_ui.sh` | `set_colors` no longer writes a background-colour escape code when `dialog` is the UI (it turned `--help` and the console green) |
+| configng Brave | Devuan desktops install `brave-origin` from Brave's apt repository (as `dl.brave.com/install.sh` sets it up) as XFCE's default web browser; `chromium`, `armbian-imager` and `code` are dropped on Devuan. A Brave failure leaves the desktop without a browser and removes Brave's source |
+| configng branding | Menu icon: the Pivuan logo from `rations/pivuan` (512 px wide). Desktop and LightDM background: `pivuan-background.png` (1920×1080) in `/usr/share/backgrounds/pivuan/`; Armbian wallpapers removed |
+| `.github/workflows/pivuan-desktop-check.yml` | Also adds Brave's repository and checks the browser package resolves without systemd and exists for arm64 |

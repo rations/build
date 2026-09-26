@@ -35,7 +35,14 @@ _motd_mark_after_header() {
 
 list_docker_names() {
   # Only show names if Docker is active and CLI is present
-  if systemctl is-active --quiet docker && command -v docker >/dev/null 2>&1; then
+  # (without systemd, e.g. sysvinit: a running dockerd)
+  local active=1
+  if [[ -d /run/systemd/system ]]; then
+    systemctl is-active --quiet docker && active=0
+  else
+    pidof dockerd >/dev/null 2>&1 && active=0
+  fi
+  if (( active == 0 )) && command -v docker >/dev/null 2>&1; then
     docker ps --format '{{.Names}}' 2>/dev/null | paste -sd, - | sed 's/,/, /g'
   fi
 }

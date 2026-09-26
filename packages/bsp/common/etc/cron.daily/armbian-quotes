@@ -1,3 +1,7 @@
 #!/bin/bash
 
+# Armbian's motd tips; other vendors' images (e.g. Pivuan) don't fetch them.
+[[ -f /etc/armbian-release ]] && . /etc/armbian-release
+[[ -n "${VENDOR}" && "${VENDOR}" != Armbian* ]] && exit 0
+
 curl --max-time 2 -L -s -o "/etc/update-motd.d/quotes.txt" "https://github.armbian.com/quotes.txt"

@@ -6,7 +6,9 @@
 #      of the Pivuan base stack (sysvinit, elogind, eudev, ifupdown), and fails if
 #      systemd or systemd-sysv would be installed or apt cannot resolve it;
 #   2. checks every package also exists for arm64 in the Devuan archive;
-#   3. does the same for the pivuan-config package's own dependencies.
+#   3. does the same for the pivuan-config package's own dependencies;
+#   4. adds Brave's apt repository the way pivuan-config does and checks the
+#      browser (DESKTOP_BRAVE_PKG, e.g. brave-origin) the same way.
 
 name: Pivuan desktop package check
 
@@ -42,7 +44,7 @@ jobs:
         run: |
           set -eu
           apt-get update -q
-          apt-get install -y -q --no-install-recommends git ca-certificates python3 python3-yaml
+          apt-get install -y -q --no-install-recommends git ca-certificates curl python3 python3-yaml
           # The Pivuan base stack the desktop is installed on top of.
           apt-get install -y -q --no-install-recommends sysvinit-core sysv-rc orphan-sysvinit-scripts eudev \
             elogind libpam-elogind dbus ifupdown isc-dhcp-client wpasupplicant chrony sudo
@@ -59,15 +61,29 @@ jobs:
           . ./parsed.sh
           echo "Packages: ${DESKTOP_PACKAGES} ${DESKTOP_DM}"
           echo "${DESKTOP_PACKAGES} ${DESKTOP_DM}" | tr ' ' '\n' | grep -v '^$' | sort -u > packages.txt
+          # Browser from Brave's apt repository (module_desktops _module_desktops_install_brave)
+          echo "${DESKTOP_BRAVE_PKG:-}" | grep -v '^$' > brave.txt || true
+          echo "Brave package: $(cat brave.txt)"
           # pivuan-config's own dependencies (tools/pivuan/build-deb.sh control file)
           sed -n 's/^Depends: //p' configng/tools/pivuan/build-deb.sh | tr ',' '\n' | sed 's/ //g' | grep -v '^$' > config-deps.txt
-          wc -l packages.txt config-deps.txt
+          wc -l packages.txt config-deps.txt brave.txt
+
+      - name: Add Brave's apt repository
+        run: |
+          set -eu
+          [ -s brave.txt ] || exit 0
+          base=https://brave-browser-apt-release.s3.brave.com
+          curl -fsSL -o /usr/share/keyrings/brave-browser-archive-keyring.gpg "$base/brave-browser-archive-keyring.gpg"
+          curl -fsSL -o /etc/apt/sources.list.d/brave-browser-release.sources "$base/brave-browser.sources"
+          cat /etc/apt/sources.list.d/brave-browser-release.sources
+          apt-get update -q
 
       - name: Simulate install (amd64)
         run: |
           set -eu
           fail=0
-          for list in packages.txt config-deps.txt; do
+          for list in packages.txt config-deps.txt brave.txt; do
+            [ -s "$list" ] || continue
             echo "::group::apt-get -s install $(wc -l < "$list") packages from $list"
             mapfile -t pkgs < "$list"
             if ! apt-get -s -y --no-install-recommends install "${pkgs[@]}" > "sim-$list" 2>&1; then
@@ -89,7 +105,8 @@ jobs:
             echo ""
             echo "- Desktop packages requested: $(wc -l < packages.txt), new packages installed: $(wc -l < inst-packages.txt)"
             echo "- pivuan-config dependencies: $(wc -l < config-deps.txt), new packages installed: $(wc -l < inst-config-deps.txt)"
-            echo "- systemd pulled in: $(grep -cxE 'systemd|systemd-sysv' inst-packages.txt inst-config-deps.txt | awk -F: '{s+=$2} END {print (s ? "YES" : "no")}')"
+            [ -s brave.txt ] && echo "- Browser $(cat brave.txt) from Brave's repository, new packages installed: $(wc -l < inst-brave.txt)"
+            echo "- systemd pulled in: $(cat inst-*.txt | grep -cxE 'systemd|systemd-sysv' | awk '{print ($1 ? "YES" : "no")}')"
           } >> "$GITHUB_STEP_SUMMARY"
           exit $fail
         shell: bash
@@ -100,7 +117,7 @@ jobs:
           dpkg --add-architecture arm64
           apt-get update -q
           missing=""
-          mapfile -t all < <(sort -u packages.txt config-deps.txt)
+          mapfile -t all < <(sort -u packages.txt config-deps.txt brave.txt)
           for p in "${all[@]}"; do
             # Architecture: all packages are listed under the native arch as well
             apt-cache show "$p:arm64" > /dev/null 2>&1 || apt-cache show "$p" 2>/dev/null | grep -q '^Architecture: all' || missing="$missing $p"
