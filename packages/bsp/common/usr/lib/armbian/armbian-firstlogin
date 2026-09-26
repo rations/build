@@ -691,7 +691,7 @@ add_user() {
 			fi
 			if [ -z "$PRESET_DEFAULT_REALNAME" ];then
 				echo -e ""
-				read -r -e -p "Please provide your real name: " -i "${RealUserName^}" RealName
+				read -r -e -p "Add a name: " -i "${RealUserName^}" RealName
 			else
 				RealName="$PRESET_DEFAULT_REALNAME"
 			fi
