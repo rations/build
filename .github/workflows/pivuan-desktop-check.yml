@@ -9,6 +9,9 @@
 #   3. does the same for the pivuan-config package's own dependencies;
 #   4. adds Brave's apt repository the way pivuan-config does and checks the
 #      browser (DESKTOP_BRAVE_PKG, e.g. brave-origin) the same way.
+# With "inspect", it then installs the desktop for real (no recommends) and
+# prints what decides whether logout/shutdown and the network applet work:
+# polkit, elogind, PAM, polkit agents, and the wallpapers XFCE offers.
 
 name: Pivuan desktop package check
 
@@ -28,6 +31,10 @@ on:
         type: choice
         options: [minimal, mid, full]
         default: minimal
+      inspect:
+        description: "Also install the desktop for real and print its session, polkit and PAM setup"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -128,4 +135,31 @@ jobs:
             exit 1
           fi
           echo "- All packages available for arm64" >> "$GITHUB_STEP_SUMMARY"
+        shell: bash
+
+      - name: Install and inspect (no recommends, as on the image)
+        if: ${{ inputs.inspect }}
+        run: |
+          set -u
+          printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d
+          mapfile -t pkgs < <(cat packages.txt config-deps.txt)
+          apt-get install -y -q --no-install-recommends "${pkgs[@]}" > install.log 2>&1 || { tail -50 install.log; echo "::warning::install failed"; }
+          sec() { echo "::group::$1"; shift; "$@" 2>&1; echo "::endgroup::"; }
+          sec "installed: polkit, elogind, agents, applet" dpkg-query -W -f='${Package} ${Version} ${Status}\n' polkitd pkexec policykit-1 libpam-elogind elogind libpolkit-agent-1-0 xfce-polkit mate-polkit lxpolkit policykit-1-gnome polkit-kde-agent-1 lxqt-policykit network-manager-gnome consolekit
+          sec "polkit agents available" apt-cache policy xfce-polkit mate-polkit lxpolkit policykit-1-gnome lxqt-policykit network-manager-gnome connman-gtk cmst
+          sec "who recommends polkitd" sh -c 'apt-cache rdepends --installed polkitd; apt-cache show xfce4-session lightdm network-manager elogind | grep -E "^(Package|Version|Depends|Recommends|Suggests):"'
+          sec "pam.d lightdm" sh -c 'for f in /etc/pam.d/lightdm /etc/pam.d/lightdm-greeter /etc/pam.d/lightdm-autologin /etc/pam.d/common-session; do echo "== $f"; grep -v "^#" "$f" | grep -v "^$"; done; ls /usr/share/pam-configs; ls /lib/*/security/pam_elogind.so /usr/lib/*/security/pam_elogind.so /usr/lib/*/security/pam_systemd.so'
+          sec "xfce4-session shutdown backends" sh -c 'for b in /usr/bin/xfce4-session /usr/lib/*/xfce4/session/xfsm-shutdown-helper /usr/sbin/lightdm /usr/sbin/slick-greeter; do echo "== $b"; strings "$b" 2>/dev/null | grep -E "login1|ConsoleKit|PowerOff|Reboot|pkexec|shutdown" | sort -u | head -30; done'
+          sec "login1 polkit policy (power-off, reboot)" sh -c 'ls /usr/share/polkit-1/actions/ /etc/polkit-1/rules.d /usr/share/polkit-1/rules.d; python3 - <<EOF
+          import xml.etree.ElementTree as ET, glob
+          for f in glob.glob("/usr/share/polkit-1/actions/org.freedesktop.login1.policy"):
+              for a in ET.parse(f).getroot().iter("action"):
+                  i = a.get("id")
+                  if any(k in i for k in ("power-off", "reboot", "halt")):
+                      d = a.find("defaults")
+                      print(i, [(c.tag, c.text) for c in d])
+          EOF'
+          sec "xfce4-session xfconf defaults, xfdesktop backdrops" sh -c 'ls -la /usr/share/backgrounds /usr/share/backgrounds/* /usr/share/xfce4/backdrops 2>&1; find /etc/xdg/xfce4 -name "*.xml" | head; strings /usr/bin/xfdesktop | grep -iE "backdrop|backgrounds|\.(png|jpg|svg)$" | sort -u | head -20'
+          sec "network-manager init script and NetworkManager.conf" sh -c 'ls -la /etc/init.d/network-manager /etc/rc2.d/*network* 2>&1; cat /etc/NetworkManager/NetworkManager.conf; ls /usr/share/dbus-1/system-services/'
+          sec "lightdm config" sh -c 'grep -v "^#" /etc/lightdm/lightdm.conf | grep -v "^$"; ls /etc/lightdm /usr/share/lightdm/lightdm.conf.d 2>&1'
         shell: bash
