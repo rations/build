@@ -20,7 +20,8 @@
 #   PIVUAN_APT_SIGNING_KEY  armored private OpenPGP key without a passphrase that signs the repository.
 #                           Every build also puts its public half into the image (apt source + keyring);
 #                           without it images get no Pivuan apt source.
-#   PIVUAN_REPO_TOKEN       fine-grained token for PIVUAN_REPO: Contents read/write, Pages read/write.
+#   PIVUAN_REPO_TOKEN       fine-grained token for PIVUAN_REPO: Contents read/write.
+# PIVUAN_REPO must serve its gh-pages branch with GitHub Pages (Settings -> Pages, set once).
 
 name: Pivuan image build
 
@@ -295,7 +296,6 @@ jobs:
         if: inputs.publish
         env:
           REPO_TOKEN: ${{ secrets.PIVUAN_REPO_TOKEN }}
-          GH_TOKEN: ${{ secrets.PIVUAN_REPO_TOKEN }}
           GNUPGHOME: ${{ steps.pivuan.outputs.gnupghome }}
           PIVUAN_APT_SIGNING_KEY_ID: ${{ steps.pivuan.outputs.fingerprint }}
           REVISION: ${{ steps.pivuan.outputs.revision }}
@@ -318,12 +318,8 @@ jobs:
           git add -A
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             commit --quiet -m "Pivuan apt repository ${REVISION} (${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          # GitHub Pages serves the branch (rations/pivuan Settings -> Pages: Deploy from a branch, gh-pages, / (root)).
           git push --quiet --force "${remote}" gh-pages
-          # Serve the branch with GitHub Pages (once).
-          if ! gh api "repos/${PIVUAN_REPO}/pages" > /dev/null 2>&1; then
-            gh api -X POST "repos/${PIVUAN_REPO}/pages" -f "source[branch]=gh-pages" -f "source[path]=/" > /dev/null ||
-              echo "::warning::Could not turn on GitHub Pages for ${PIVUAN_REPO}: in its Settings -> Pages choose 'Deploy from a branch', gh-pages, / (root)"
-          fi
           {
             echo "## Apt repository"
             echo ""

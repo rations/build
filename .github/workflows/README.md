@@ -28,7 +28,10 @@ Publishing needs two repository secrets (Settings > Secrets and variables > Acti
   `/etc/apt/sources.list.d/pivuan.sources`. Without it images get no Pivuan apt source.
   Keep a copy offline: installed systems only trust this key.
 - `PIVUAN_REPO_TOKEN`: fine-grained personal access token, repository rations/pivuan
-  only, permissions Contents: read and write, Pages: read and write.
+  only, permission Contents: read and write.
+
+rations/pivuan serves the repository with GitHub Pages (Settings > Pages: Deploy from a
+branch, `gh-pages`, `/ (root)`; set once).
 
 Armbian's own workflows (issue/PR automation, label and board syncing, mirroring,
 security scans, scheduled maintenance) were removed. They target armbian/build's
