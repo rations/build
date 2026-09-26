@@ -530,3 +530,8 @@ The desktop install uses no Recommends, so several things a Debian XFCE gets thr
 | Wizard: "Please provide your real name" | | build: `armbian-firstlogin` asks "Add a name" |
 
 `pivuan-desktop-check.yml` has an `inspect` option: it installs the desktop for real in the Devuan container and prints polkit, PAM, elogind, autostart and wallpaper facts.
+
+Follow-up after the v26.11.0.10 test (shutdown and background confirmed working):
+
+- **"not managed"**: NetworkManager's ifupdown plugin reads *every* file in `/etc/network/interfaces.d` (ifupdown only names without a dot), so the renamed `wired.pre-networkmanager` / `wlan0.pre-networkmanager` still kept the interfaces unmanaged. They now go to `/etc/network/interfaces.pre-networkmanager/`.
+- **xfce-polkit "User of caller and user of subject differs"**: pivuan-config started LightDM from root's console session; elogind maps processes to sessions by cgroup (`/<session>`), so the desktop logins joined root's session. The display manager start and the NetworkManager restart now run from the root cgroup (`_desktop_outside_session`). After a reboot LightDM is started by init and was never affected.
