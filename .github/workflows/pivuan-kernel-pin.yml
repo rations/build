@@ -1,0 +1,107 @@
+# Move the Pivuan kernel pin when the Raspberry Pi kernel branch reaches a new point release.
+#
+# The image builds use one fixed commit of the Foundation's rpi-6.x.y branch (the
+# "pivuan-kernel-pin" marker and KERNELBRANCH="commit:..." in config/sources/families/bcm2711.conf),
+# so the compiled kernel is cached and reused. Security fixes arrive as stable point releases
+# (6.18.53 -> 6.18.54 ...). Once a week this job reads the kernel version at the branch head; when it
+# is newer than the pinned one it moves the pin to that commit, pushes it to the default branch and
+# starts "Pivuan image build" with publish=true (new image release + apt repository update).
+# Commits between point releases (Pi-specific changes) do not move the pin.
+
+name: Pivuan kernel pin
+
+on:
+  schedule:
+    - cron: "17 3 * * 1" # Mondays 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Move the pin to the branch head even without a new point release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # push the new pin
+  actions: write # start the image build
+
+concurrency:
+  group: pivuan-kernel-pin
+  cancel-in-progress: false
+
+jobs:
+  pin:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Check the kernel branch
+        id: check
+        env:
+          FORCE: ${{ inputs.force && 'yes' || 'no' }}
+        run: |
+          set -euo pipefail
+          conf=config/sources/families/bcm2711.conf
+          marker="$(grep -E '^[[:space:]]*# pivuan-kernel-pin: branch=[^ ]+ version=[0-9.]+$' "${conf}")" || {
+            echo "::error::no pivuan-kernel-pin marker line in ${conf}"
+            exit 1
+          }
+          branch="$(sed -E 's/.*branch=([^ ]+).*/\1/' <<< "${marker}")"
+          pinned_version="$(sed -E 's/.*version=([0-9.]+)$/\1/' <<< "${marker}")"
+          pinned_sha="$(grep -A1 -F "${marker}" "${conf}" | sed -nE 's/.*KERNELBRANCH="commit:([0-9a-f]{40})".*/\1/p')"
+          [[ -n "${pinned_sha}" ]] || { echo "::error::no KERNELBRANCH=\"commit:<sha>\" line after the marker"; exit 1; }
+
+          head_sha="$(git ls-remote https://github.com/raspberrypi/linux "refs/heads/${branch}" | cut -f1)"
+          [[ "${head_sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::branch ${branch} not found"; exit 1; }
+          makefile="$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/raspberrypi/linux/${head_sha}/Makefile")"
+          field() { sed -nE "s/^$1 = ([0-9]+)$/\1/p" <<< "${makefile}" | head -1; }
+          head_version="$(field VERSION).$(field PATCHLEVEL).$(field SUBLEVEL)"
+          [[ "${head_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::cannot read the kernel version at ${head_sha}"; exit 1; }
+
+          echo "Pinned: ${pinned_version} ${pinned_sha}"
+          echo "Head of ${branch}: ${head_version} ${head_sha}"
+          move=no
+          if [[ "${head_sha}" != "${pinned_sha}" ]]; then
+            if dpkg --compare-versions "${head_version}" gt "${pinned_version}" || [[ "${FORCE}" == yes ]]; then
+              move=yes
+            fi
+          fi
+          {
+            echo "## Kernel pin (${branch})"
+            echo ""
+            echo "- Pinned: ${pinned_version} (\`${pinned_sha:0:12}\`)"
+            echo "- Branch head: ${head_version} (\`${head_sha:0:12}\`)"
+            if [[ "${move}" == yes ]]; then
+              echo "- **Moving the pin** to ${head_version} and starting a published image build."
+            else
+              echo "- No new point release; pin unchanged."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${move}" == yes ]]; then
+            sed -i -E \
+              -e "s|^([[:space:]]*# pivuan-kernel-pin: branch=${branch} version=)[0-9.]+$|\1${head_version}|" \
+              -e "s|KERNELBRANCH=\"commit:${pinned_sha}\"|KERNELBRANCH=\"commit:${head_sha}\"|" \
+              "${conf}"
+            git diff --exit-code --quiet "${conf}" && { echo "::error::pin line was not updated"; exit 1; }
+            git diff "${conf}"
+          fi
+          echo "move=${move}" >> "${GITHUB_OUTPUT}"
+          echo "version=${head_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Push the new pin
+        if: steps.check.outputs.move == 'yes'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Pivuan: kernel pin to ${{ steps.check.outputs.version }}"
+          git push origin "HEAD:${{ github.event.repository.default_branch }}"
+
+      - name: Start the published image build
+        if: steps.check.outputs.move == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pivuan-build.yml --repo "${{ github.repository }}" --ref "${{ github.event.repository.default_branch }}" -f publish=true

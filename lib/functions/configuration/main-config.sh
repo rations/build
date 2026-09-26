@@ -98,8 +98,10 @@ function do_main_configuration() {
 
 	# Armbian config is central tool used in all builds. As its build externally, we have moved it to extension. Enable it here.
 	# Devuan (Pivuan) images get pivuan-config instead: the same tool from the configng fork, without systemd.
+	# They also get the Pivuan apt repository (updates for installed systems).
 	if is_devuan_release "${RELEASE}"; then
 		enable_extension "pivuan-config"
+		enable_extension "pivuan-apt"
 	else
 		enable_extension "armbian-config"
 	fi

@@ -506,3 +506,12 @@ pivuan-config            # System → Desktops → XFCE
 | configng Brave | Devuan desktops install `brave-origin` from Brave's apt repository (as `dl.brave.com/install.sh` sets it up) as XFCE's default web browser; `chromium`, `armbian-imager` and `code` are dropped on Devuan. A Brave failure leaves the desktop without a browser and removes Brave's source |
 | configng branding | Menu icon: the Pivuan logo from `rations/pivuan` (512 px wide). Desktop and LightDM background: `pivuan-background.png` (1920×1080) in `/usr/share/backgrounds/pivuan/`; Armbian wallpapers removed |
 | `.github/workflows/pivuan-desktop-check.yml` | Also adds Brave's repository and checks the browser package resolves without systemd and exists for arm64 |
+
+## 15. Updates: kernel pin and the Pivuan apt repository
+
+- **Kernel pin.** `bcm2711.conf` (`current`) builds one commit of `rpi-6.18.y` (marker line `# pivuan-kernel-pin: branch=… version=…`), so the compiled kernel is cached. `pivuan-kernel-pin.yml` checks weekly and moves the pin only when the branch's Makefile version goes up (new stable point release), then starts a published build.
+- **Versions.** Each build's packages are `<VERSION without -trunk>.<run number>` (`26.11.0.14`), newer than every earlier build for apt. `KEEP_HASHED_DEB_ARTIFACTS=yes` keeps the unversioned kernel in `output/packages-hashed` (cached); `output/debs` is no longer cached.
+- **Apt repository.** `publish=true` builds put the build's packages (Armbian's reversioned debs: kernel, dtb, firmware, BSP, base-files …, plus pivuan-config) into `gh-pages` of rations/pivuan with `.github/pivuan/publish-apt.sh`: `pool/main/…`, `dists/excalibur/{InRelease,Release,Release.gpg}`, `main/binary-arm64/Packages{,.gz,.xz}`, the public key, `index.html`. Last 3 versions per package; the branch is one force-pushed commit so old packages don't accumulate. GitHub Pages serves it at https://rations.github.io/pivuan (turned on by the workflow if the token may).
+- **Images.** `extensions/pivuan-apt.sh` (Devuan only) writes `/etc/apt/sources.list.d/pivuan.sources` and `/usr/share/keyrings/pivuan-archive-keyring.gpg` at the very end of the image build (`pre_umount_final_image`), so building never needs the repository online. Installed systems: `apt update && apt full-upgrade`.
+- **Releases.** The published build's `.img.xz` and `.sha` become release `v<version>` in rations/pivuan.
+- **Secrets:** `PIVUAN_APT_SIGNING_KEY`, `PIVUAN_REPO_TOKEN` (see `.github/workflows/README.md`).

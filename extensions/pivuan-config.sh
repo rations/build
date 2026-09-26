@@ -18,4 +18,10 @@ function post_repo_customize_image__install_pivuan_config() {
 	display_alert "Extension: ${EXTENSION}: installing" "$(basename "${deb}")" "info"
 	install_deb_chroot "${deb}"
 	run_host_command_logged rm -f "${SDCARD}/root/$(basename "${deb}")"
+
+	# Keep a copy for the Pivuan apt repository (published by the "Pivuan image build" workflow).
+	declare publish_dir="${SRC}/output/pivuan-publish"
+	run_host_command_logged mkdir -p "${publish_dir}"
+	run_host_command_logged rm -f "${publish_dir}"/pivuan-config_*.deb
+	run_host_command_logged cp -v "${deb}" "${publish_dir}/"
 }

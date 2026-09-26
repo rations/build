@@ -9,6 +9,18 @@
 # DEVUAN_KEY_FINGERPRINTS (Settings -> Secrets and variables -> Actions -> Variables); it takes
 # precedence. Compare with `gpg --show-keys /usr/share/keyrings/devuan-archive-keyring.gpg` on a
 # Devuan machine you trust. When Devuan rotates a key, the keyring step fails and names the new signer.
+#
+# Versions: every run builds its packages as <VERSION without "-trunk">.<run number> (e.g. 26.11.0.14),
+# so each build is newer than the last one for apt.
+#
+# Publishing (publish=true; the weekly "Pivuan kernel pin" workflow sets it): the packages go to the
+# Pivuan apt repository on GitHub Pages of PIVUAN_REPO (https://rations.github.io/pivuan, branch
+# gh-pages, last 3 versions of each package) and the image becomes a GitHub Release there.
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   PIVUAN_APT_SIGNING_KEY  armored private OpenPGP key without a passphrase that signs the repository.
+#                           Every build also puts its public half into the image (apt source + keyring);
+#                           without it images get no Pivuan apt source.
+#   PIVUAN_REPO_TOKEN       fine-grained token for PIVUAN_REPO: Contents read/write, Pages read/write.
 
 name: Pivuan image build
 
@@ -37,6 +49,10 @@ on:
         description: "Reuse kernel/package and rootfs caches from earlier runs"
         type: boolean
         default: true
+      publish:
+        description: "Publish: update the Pivuan apt repository and make a GitHub Release with the image"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -65,6 +81,8 @@ jobs:
       DEVUAN_POOL_BASE: http://pkgmaster.devuan.org/devuan
       DEVUAN_MERGED_BASE: http://deb.devuan.org/merged
       CACHE_PREFIX: pivuan-arm64-${{ inputs.board }}-${{ inputs.release }}
+      # Where the apt repository (GitHub Pages, branch gh-pages) and the releases are published.
+      PIVUAN_REPO: ${{ vars.PIVUAN_REPO || 'rations/pivuan' }}
 
     steps:
       - name: Check out
@@ -160,12 +178,59 @@ jobs:
 
           echo "file=${out}" >> "${GITHUB_OUTPUT}"
 
+      - name: Version and Pivuan apt signing key
+        id: pivuan
+        env:
+          SIGNING_KEY: ${{ secrets.PIVUAN_APT_SIGNING_KEY }}
+          REPO_TOKEN: ${{ secrets.PIVUAN_REPO_TOKEN }}
+          PUBLISH: ${{ inputs.publish && 'yes' || 'no' }}
+        run: |
+          set -euo pipefail
+          revision="$(cut -d- -f1 VERSION).${GITHUB_RUN_NUMBER}"
+          echo "revision=${revision}" >> "${GITHUB_OUTPUT}"
+          echo "Package version: ${revision}"
+
+          work="${RUNNER_TEMP}/pivuan-apt"
+          mkdir -p "${work}"
+          export GNUPGHOME="${work}/gnupg"
+          mkdir -m 700 "${GNUPGHOME}"
+          echo "gnupghome=${GNUPGHOME}" >> "${GITHUB_OUTPUT}"
+          if [[ -z "${SIGNING_KEY}" ]]; then
+            if [[ "${PUBLISH}" == yes ]]; then
+              echo "::error::publish=true needs the PIVUAN_APT_SIGNING_KEY secret"
+              exit 1
+            fi
+            echo "::warning::PIVUAN_APT_SIGNING_KEY is not set: the image gets no Pivuan apt source"
+            echo "key_file=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [[ "${PUBLISH}" == yes && -z "${REPO_TOKEN}" ]]; then
+            echo "::error::publish=true needs the PIVUAN_REPO_TOKEN secret"
+            exit 1
+          fi
+          gpg --batch --quiet --import <<< "${SIGNING_KEY}"
+          mapfile -t fprs < <(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10 }' | sort -u)
+          if [[ ${#fprs[@]} -eq 0 ]]; then
+            echo "::error::PIVUAN_APT_SIGNING_KEY holds no private key"
+            exit 1
+          fi
+          fpr="${fprs[0]}"
+          gpg --batch --armor --export "${fpr}" > "${work}/pivuan-archive-keyring.asc"
+          echo "fingerprint=${fpr}" >> "${GITHUB_OUTPUT}"
+          echo "key_file=${work}/pivuan-archive-keyring.asc" >> "${GITHUB_OUTPUT}"
+          {
+            echo "## Pivuan apt repository key"
+            echo ""
+            echo "- Package version: \`${revision}\`"
+            echo "- Signing key: \`${fpr}\` (put into the image with the apt source https://rations.github.io/pivuan)"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Restore build cache
         if: inputs.use_cache
         uses: actions/cache/restore@v4
         with:
+          # output/debs is not cached: each run re-versions its packages from packages-hashed.
           path: |
-            output/debs
             output/packages-hashed
             cache/rootfs
           key: ${{ env.CACHE_PREFIX }}-${{ inputs.kernel_branch }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -178,6 +243,8 @@ jobs:
           set -euo pipefail
           # PREFER_DOCKER=no: build natively (compile.sh re-runs itself with sudo) so the
           # cached directories and the keyring path are plain host paths.
+          # KEEP_HASHED_DEB_ARTIFACTS=yes: keep the unversioned packages (the compiled kernel) in
+          # output/packages-hashed; every run gives them a new version, so they must be reusable.
           ./compile.sh build \
             BOARD="${BOARD}" \
             BRANCH="${KERNEL_BRANCH}" \
@@ -188,24 +255,26 @@ jobs:
             EXPERT=yes \
             PREFER_DOCKER=no \
             COMPRESS_OUTPUTIMAGE=sha,xz \
+            REVISION="${{ steps.pivuan.outputs.revision }}" \
+            KEEP_HASHED_DEB_ARTIFACTS=yes \
+            PIVUAN_APT_KEY_FILE="${{ steps.pivuan.outputs.key_file }}" \
             DEVUAN_KEYRING_FILE="${{ steps.keyring.outputs.file }}"
 
       - name: Prune caches and fix ownership
         if: always() && inputs.use_cache
         run: |
-          mkdir -p output/debs output/packages-hashed cache/rootfs
-          sudo chown -R "$(id -u):$(id -g)" output/debs output/packages-hashed cache/rootfs
-          # Drop packages not rebuilt for 30 days, and keep only the two newest rootfs tarballs.
-          find output/debs output/packages-hashed -type f -mtime +30 -delete
+          mkdir -p output/packages-hashed cache/rootfs
+          sudo chown -R "$(id -u):$(id -g)" output/packages-hashed cache/rootfs
+          # Drop packages not used for 30 days (reuse touches them), and keep only the two newest rootfs tarballs.
+          find output/packages-hashed -type f -mtime +30 -delete
           find cache/rootfs -maxdepth 1 -name '*.tar.zst' -printf '%T@ %p\n' | sort -rn | tail -n +3 | cut -d' ' -f2- | xargs -r rm -fv
-          du -sh output/debs output/packages-hashed cache/rootfs
+          du -sh output/packages-hashed cache/rootfs
 
       - name: Save build cache
         if: always() && inputs.use_cache
         uses: actions/cache/save@v4
         with:
           path: |
-            output/debs
             output/packages-hashed
             cache/rootfs
           key: ${{ env.CACHE_PREFIX }}-${{ inputs.kernel_branch }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -221,6 +290,76 @@ jobs:
           if-no-files-found: error
           compression-level: 0 # already xz-compressed
           retention-days: 14
+
+      - name: Publish the apt repository
+        if: inputs.publish
+        env:
+          REPO_TOKEN: ${{ secrets.PIVUAN_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.PIVUAN_REPO_TOKEN }}
+          GNUPGHOME: ${{ steps.pivuan.outputs.gnupghome }}
+          PIVUAN_APT_SIGNING_KEY_ID: ${{ steps.pivuan.outputs.fingerprint }}
+          REVISION: ${{ steps.pivuan.outputs.revision }}
+        run: |
+          set -euo pipefail
+          sudo chown -R "$(id -u):$(id -g)" output
+          command -v apt-ftparchive > /dev/null || sudo apt-get install -y -q apt-utils
+          site="${RUNNER_TEMP}/pivuan-site"
+          remote="https://x-access-token:${REPO_TOKEN}@github.com/${PIVUAN_REPO}.git"
+          if git ls-remote --exit-code "${remote}" refs/heads/gh-pages > /dev/null; then
+            git clone --quiet --depth 1 --branch gh-pages "${remote}" "${site}"
+          else
+            mkdir -p "${site}"
+          fi
+          rm -rf "${site}/.git"
+          bash .github/pivuan/publish-apt.sh "${site}" "${REVISION}" output/debs output/pivuan-publish
+          # One commit, force-pushed: old package versions leave the branch instead of piling up in its history.
+          cd "${site}"
+          git init --quiet -b gh-pages
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "Pivuan apt repository ${REVISION} (${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          git push --quiet --force "${remote}" gh-pages
+          # Serve the branch with GitHub Pages (once).
+          if ! gh api "repos/${PIVUAN_REPO}/pages" > /dev/null 2>&1; then
+            gh api -X POST "repos/${PIVUAN_REPO}/pages" -f "source[branch]=gh-pages" -f "source[path]=/" > /dev/null ||
+              echo "::warning::Could not turn on GitHub Pages for ${PIVUAN_REPO}: in its Settings -> Pages choose 'Deploy from a branch', gh-pages, / (root)"
+          fi
+          {
+            echo "## Apt repository"
+            echo ""
+            echo "Published to https://github.com/${PIVUAN_REPO}/tree/gh-pages (served at https://$(cut -d/ -f1 <<< "${PIVUAN_REPO}").github.io/$(cut -d/ -f2 <<< "${PIVUAN_REPO}")/):"
+            echo ""
+            echo '```'
+            awk '/^Package: /{p=$2} /^Version: /{print p " " $2}' dists/*/main/binary-*/Packages | sort
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Publish the image as a release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.PIVUAN_REPO_TOKEN }}
+          REVISION: ${{ steps.pivuan.outputs.revision }}
+        run: |
+          set -euo pipefail
+          tag="v${REVISION}"
+          files=(output/images/*.img.xz output/images/*.img.xz.sha)
+          image="$(basename "${files[0]}")"
+          notes="$(cat <<- EOF
+          Pivuan ${REVISION}: Devuan ${RELEASE} with sysvinit for the Raspberry Pi (${BOARD} image, kernel branch ${KERNEL_BRANCH}).
+
+          Image: \`${image}\`. Flash it with balenaEtcher or \`xzcat ${image} | sudo dd of=/dev/sdX bs=4M conv=fsync\`; the .sha file holds its SHA256.
+
+          Already running Pivuan? \`sudo apt update && sudo apt full-upgrade\` installs this build's kernel, firmware, board support and pivuan-config from https://rations.github.io/pivuan.
+
+          Built by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} from ${GITHUB_REPOSITORY}@${GITHUB_SHA}.
+          EOF
+          )"
+          if gh release view "${tag}" --repo "${PIVUAN_REPO}" > /dev/null 2>&1; then
+            gh release upload "${tag}" --repo "${PIVUAN_REPO}" --clobber "${files[@]}"
+          else
+            gh release create "${tag}" --repo "${PIVUAN_REPO}" --title "Pivuan ${REVISION}" --notes "${notes}" "${files[@]}"
+          fi
+          echo "- Release: https://github.com/${PIVUAN_REPO}/releases/tag/${tag}" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload build logs
         if: always()
