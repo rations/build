@@ -21,7 +21,7 @@ on:
       configng_ref:
         description: "rations/configng branch or tag"
         type: string
-        default: claude/loving-fermi-gp2uoo
+        default: pivuan
       desktop:
         description: "Desktop (YAML name)"
         type: string

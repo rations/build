@@ -7,7 +7,7 @@
 # X-Stop-After:      rsyslog
 # Default-Start:     S
 # Default-Stop:      0 6
-# Short-Description: Armbian memory supported logging
+# Short-Description: Pivuan memory supported logging
 ### END INIT INFO
 #
 # sysvinit (Devuan / Pivuan) counterpart of armbian-ramlog.service: runs /usr/lib/armbian/armbian-ramlog.
@@ -25,12 +25,12 @@ PROG=/usr/lib/armbian/armbian-ramlog
 
 case "$1" in
 	start)
-		log_action_begin_msg "Armbian memory supported logging"
+		log_action_begin_msg "Pivuan memory supported logging"
 		"${PROG}" start < /dev/null >> /run/armbian-init.log 2>&1
 		log_action_end_msg $?
 		;;
 	stop)
-		log_action_begin_msg "Armbian memory supported logging (stop)"
+		log_action_begin_msg "Pivuan memory supported logging (stop)"
 		"${PROG}" stop < /dev/null >> /run/armbian-init.log 2>&1
 		log_action_end_msg $?
 		;;

@@ -468,7 +468,7 @@ cat /run/armbian-init.log                 # output of the Armbian init scripts; 
 
 ## 13. Phase 3 implementation status (configng → pivuan-config)
 
-Code written in `rations/configng` (branch `claude/loving-fermi-gp2uoo`) and wired into this build. **Not yet run on a Pi.**
+Code written in `rations/configng` (branch `pivuan`, first developed as `claude/loving-fermi-gp2uoo`) and wired into this build. **Not yet run on a Pi.**
 
 | Where | Change |
 |---|---|
@@ -488,7 +488,7 @@ Code written in `rations/configng` (branch `claude/loving-fermi-gp2uoo`) and wir
 
 ```sh
 apt install git jq python3-yaml
-git clone -b claude/loving-fermi-gp2uoo https://github.com/rations/configng
+git clone -b pivuan https://github.com/rations/configng
 cd configng && tools/pivuan/build-deb.sh && apt install ./output/pivuan-config_*.deb
 pivuan-config            # System → Desktops → XFCE
 ```
@@ -535,3 +535,17 @@ Follow-up after the v26.11.0.10 test (shutdown and background confirmed working)
 
 - **"not managed"**: NetworkManager's ifupdown plugin reads *every* file in `/etc/network/interfaces.d` (ifupdown only names without a dot), so the renamed `wired.pre-networkmanager` / `wlan0.pre-networkmanager` still kept the interfaces unmanaged. They now go to `/etc/network/interfaces.pre-networkmanager/`.
 - **xfce-polkit "User of caller and user of subject differs"**: pivuan-config started LightDM from root's console session; elogind maps processes to sessions by cgroup (`/<session>`), so the desktop logins joined root's session. The display manager start and the NetworkManager restart now run from the root cgroup (`_desktop_outside_session`). After a reboot LightDM is started by init and was never affected.
+
+## 17. Leftover Armbian names
+
+The configng fork's working branch is now `pivuan` (renamed from `claude/loving-fermi-gp2uoo`, and the default branch on GitHub). `PIVUAN_CONFIG_BRANCH` and the desktop check default to it.
+
+| Where | Change |
+|---|---|
+| build `main-config.sh` | Devuan images get the hostname `pivuan` (was the board name, `rpi4b`). `armbian-firstrun` only renames an `rpi4b` host after the Pi model (`rpi5b`, …), so it leaves `pivuan` alone |
+| build sysvinit init scripts | Boot messages say "Pivuan …" (script names unchanged) |
+| configng XFCE skel | Terminal window title `Pivuan` |
+| configng pivuan-config | About screen and messages name pivuan-config and the Pivuan project; kernel/firmware hold, read-only filesystem and network revert entries no longer say Armbian; Armbian infrastructure services and the Armbian image downloader are hidden when `/etc/devuan_version` exists |
+| configng browser policies | Firefox/Chromium/Chrome/Thunderbird homepage, first-run page and bookmarks point at Pivuan, Devuan and the Raspberry Pi documentation |
+
+Left as they are: internal names that users don't normally see and that other code depends on (`/usr/lib/armbian/`, `/etc/armbian-release`, `armbian-*` package and init script names, `/var/log/armbian-config.log`).

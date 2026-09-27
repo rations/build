@@ -6,7 +6,7 @@
 # Should-Start:      ssh
 # Default-Start:     2 3 4 5
 # Default-Stop:
-# Short-Description: Armbian first run tasks
+# Short-Description: Pivuan first run tasks
 ### END INIT INFO
 #
 # sysvinit (Devuan / Pivuan) counterpart of armbian-firstrun.service: runs /usr/lib/armbian/armbian-firstrun.
@@ -35,7 +35,7 @@ case "$1" in
 		# As with the systemd unit: run in the background, detached from the console, so the boot and the
 		# login prompt don't wait for it and nothing can prompt or print on the console. It keeps its own log.
 		setsid -f "${PROG}" start < /dev/null >> /run/armbian-init.log 2>&1
-		log_action_msg "Armbian first run tasks started in the background"
+		log_action_msg "Pivuan first run tasks started in the background"
 		;;
 	stop | restart | force-reload)
 		# Nothing to undo: this only runs once at boot.

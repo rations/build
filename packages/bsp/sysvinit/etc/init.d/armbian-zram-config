@@ -6,7 +6,7 @@
 # X-Start-Before:    armbian-ramlog
 # Default-Start:     S
 # Default-Stop:
-# Short-Description: Armbian ZRAM config
+# Short-Description: Pivuan ZRAM config
 ### END INIT INFO
 #
 # sysvinit (Devuan / Pivuan) counterpart of armbian-zram-config.service: runs /usr/lib/armbian/armbian-zram-config.
@@ -24,7 +24,7 @@ PROG=/usr/lib/armbian/armbian-zram-config
 
 case "$1" in
 	start)
-		log_action_begin_msg "Armbian ZRAM config"
+		log_action_begin_msg "Pivuan ZRAM config"
 		"${PROG}" start < /dev/null >> /run/armbian-init.log 2>&1
 		log_action_end_msg $?
 		;;

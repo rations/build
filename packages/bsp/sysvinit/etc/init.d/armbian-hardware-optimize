@@ -6,7 +6,7 @@
 # Should-Start:      armbian-hardware-monitor
 # Default-Start:     S
 # Default-Stop:
-# Short-Description: Armbian hardware optimization
+# Short-Description: Pivuan hardware optimization
 ### END INIT INFO
 #
 # sysvinit (Devuan / Pivuan) counterpart of armbian-hardware-optimize.service: runs /usr/lib/armbian/armbian-hardware-optimization.
@@ -24,7 +24,7 @@ PROG=/usr/lib/armbian/armbian-hardware-optimization
 
 case "$1" in
 	start)
-		log_action_begin_msg "Armbian hardware optimization"
+		log_action_begin_msg "Pivuan hardware optimization"
 		"${PROG}" start < /dev/null >> /run/armbian-init.log 2>&1
 		log_action_end_msg $?
 		;;

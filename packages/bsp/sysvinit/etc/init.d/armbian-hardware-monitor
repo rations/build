@@ -5,7 +5,7 @@
 # Required-Stop:
 # Default-Start:     S
 # Default-Stop:
-# Short-Description: Armbian hardware monitoring
+# Short-Description: Pivuan hardware monitoring
 ### END INIT INFO
 #
 # sysvinit (Devuan / Pivuan) counterpart of armbian-hardware-monitor.service: runs /usr/lib/armbian/armbian-hardware-monitor.
@@ -23,7 +23,7 @@ PROG=/usr/lib/armbian/armbian-hardware-monitor
 
 case "$1" in
 	start)
-		log_action_begin_msg "Armbian hardware monitoring"
+		log_action_begin_msg "Pivuan hardware monitoring"
 		"${PROG}" start < /dev/null >> /run/armbian-init.log 2>&1
 		log_action_end_msg $?
 		;;

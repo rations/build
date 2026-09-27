@@ -2,7 +2,7 @@
 
 function extension_prepare_config__pivuan_config() {
 	declare -g PIVUAN_CONFIG_REPO="${PIVUAN_CONFIG_REPO:-https://github.com/rations/configng.git}"
-	declare -g PIVUAN_CONFIG_BRANCH="${PIVUAN_CONFIG_BRANCH:-claude/loving-fermi-gp2uoo}"
+	declare -g PIVUAN_CONFIG_BRANCH="${PIVUAN_CONFIG_BRANCH:-pivuan}"
 	display_alert "Extension: ${EXTENSION}: pivuan-config source" "${PIVUAN_CONFIG_REPO} ${PIVUAN_CONFIG_BRANCH}" "info"
 }
 

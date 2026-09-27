@@ -146,6 +146,8 @@ function do_main_configuration() {
 	fi
 
 	[[ -z $EXIT_PATCHING_ERROR ]] && EXIT_PATCHING_ERROR="" # exit patching if failed
+	# Pivuan images are called "pivuan" on every Pi model. This also stops armbian-firstrun renaming rpi4b images after the detected model (rpi5b, rpi3b, ...).
+	[[ -z $HOST ]] && is_devuan_release "${RELEASE}" && HOST="pivuan"
 	[[ -z $HOST ]] && HOST="$BOARD"
 	cd "${SRC}" || exit
 
