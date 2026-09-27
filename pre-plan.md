@@ -575,5 +575,6 @@ MATE (`pivuan-config --cmd MATE01`) reuses the XFCE fixes:
 | Pivuan menu icon | `org.mate.panel.menubar icon-name='pivuan'`, `/usr/share/pixmaps/pivuan.png` |
 | Brave Origin as the browser | same install; default through `/etc/xdg/mimeapps.list` (`brave-origin.desktop`) |
 | LightDM session | postinst sets `user-session=mate` (the shared greeter file names XFCE) |
+| xfce4-terminal instead of terminator | mate-terminal; terminator removed, and the default terminal setting points at mate-terminal |
 
 The wizard's tips list both commands. Checked in the Devuan container (desktop check with `inspect`): the package list resolves without systemd and exists for arm64.
