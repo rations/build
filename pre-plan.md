@@ -549,3 +549,12 @@ The configng fork's working branch is now `pivuan` (renamed from `claude/loving-
 | configng browser policies | Firefox/Chromium/Chrome/Thunderbird homepage, first-run page and bookmarks point at Pivuan, Devuan and the Raspberry Pi documentation |
 
 Left as they are: internal names that users don't normally see and that other code depends on (`/usr/lib/armbian/`, `/etc/armbian-release`, `armbian-*` package and init script names, `/var/log/armbian-config.log`).
+
+### Network menu
+
+pivuan-config's netplan entries (basic setup, fallback DHCP, view configuration, advanced bridged configuration) can't work on Devuan and are hidden there. Instead (configng `tools/modules/network/module_networkmanager.sh`):
+
+- **Network connections** runs `nmtui` once NetworkManager manages the network (network-manager installed and no ifupdown stanza left in `interfaces.d`).
+- **Switch to NetworkManager** (console images) installs network-manager and runs the desktop install's ifupdown handover (`_module_desktops_ifupdown_to_networkmanager`), carrying the first-login Wi-Fi network over. It asks first and ignores SIGHUP so a dropped SSH session doesn't stop it halfway. Scriptable: `pivuan-config --api module_networkmanager switch --yes`.
+
+The desktop package check workflow tests the switch in the Devuan container.
