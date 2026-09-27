@@ -137,6 +137,36 @@ jobs:
           echo "- All packages available for arm64" >> "$GITHUB_STEP_SUMMARY"
         shell: bash
 
+      - name: "pivuan-config: console switch to NetworkManager"
+        run: |
+          set -eu
+          # Build and install pivuan-config from the checked-out branch.
+          configng/tools/pivuan/build-deb.sh "$PWD/deb"
+          apt-get install -y -q --no-install-recommends ./deb/pivuan-config_*.deb
+          # The console image's ifupdown setup: Ethernet plus a first-login Wi-Fi network.
+          mkdir -p /etc/network/interfaces.d
+          printf 'allow-hotplug eth0\niface eth0 inet dhcp\n' > /etc/network/interfaces.d/wired
+          printf 'allow-hotplug wlan0\niface wlan0 inet dhcp\n\twpa-ssid Pivuan Test\n\twpa-psk test-passphrase\n' > /etc/network/interfaces.d/wlan0
+          fail=0
+          if pivuan-config --api module_networkmanager status; then echo "::error::status says switched before the switch"; fail=1; fi
+          # DIALOG=bash: plain text instead of dialog boxes (no terminal here).
+          DIALOG=bash pivuan-config --api module_networkmanager switch --yes < /dev/null || true
+          echo "::group::result"
+          ls -la /etc/network/interfaces.d /etc/network/interfaces.pre-networkmanager /etc/NetworkManager/system-connections /etc/NetworkManager/conf.d || true
+          cat /etc/NetworkManager/system-connections/*.nmconnection || true
+          ls /etc/rc2.d | grep -i network || true
+          dpkg -L network-manager | grep -E '/bin/nm(cli|tui)$' || true
+          echo "::endgroup::"
+          [ -e /etc/network/interfaces.d/wired ] && { echo "::error::wired still in interfaces.d"; fail=1; }
+          [ -f /etc/network/interfaces.pre-networkmanager/wlan0 ] || { echo "::error::wlan0 not moved aside"; fail=1; }
+          grep -q '^ssid=Pivuan Test$' /etc/NetworkManager/system-connections/*.nmconnection || { echo "::error::Wi-Fi network not carried over"; fail=1; }
+          command -v nmtui > /dev/null || { echo "::error::nmtui missing after installing network-manager"; fail=1; }
+          ls /etc/rc2.d | grep -qi network-manager || { echo "::error::network-manager not enabled"; fail=1; }
+          pivuan-config --api module_networkmanager status || { echo "::error::status says not switched after the switch"; fail=1; }
+          echo "- Console switch to NetworkManager: $([ $fail = 0 ] && echo ok || echo FAILED)" >> "$GITHUB_STEP_SUMMARY"
+          exit $fail
+        shell: bash
+
       - name: Install and inspect (no recommends, as on the image)
         if: ${{ inputs.inspect }}
         run: |
