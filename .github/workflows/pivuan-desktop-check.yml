@@ -180,6 +180,9 @@ jobs:
           mapfile -t pkgs < <(cat packages.txt config-deps.txt)
           apt-get install -y -q --no-install-recommends "${pkgs[@]}" > install.log 2>&1 || { tail -50 install.log; echo "::warning::install failed"; }
           sec() { echo "::group::$1"; shift; "$@" 2>&1; echo "::endgroup::"; }
+          apt-get install -y -q --no-install-recommends binutils > /dev/null 2>&1
+          sec "browsers installed (Brave only on Devuan)" sh -c 'dpkg-query -W -f="\${Package}\n" | grep -iE "firefox|chromium|epiphany|brave" || echo none'
+          sec "desktop postinst (${{ inputs.desktop }})" sh -c 'p="configng/tools/modules/desktops/postinst/${{ inputs.desktop }}.sh"; [ -f "$p" ] || exit 0; bash "$p"; echo "exit $?"; GSETTINGS_BACKEND=memory gsettings get org.mate.background picture-filename 2>&1; ls -la /usr/share/pixmaps/pivuan.png /usr/share/mate-background-properties 2>&1; grep -A1 menubar /etc/dconf/db/local.d/00-desktop 2>&1'
           sec "logind seat dirs, elogind config" sh -c 'grep -rv "^#" /etc/elogind/logind.conf | grep -v "^$"; ls -la /etc/init.d/elogind /etc/rc*.d/*elogind*; grep -n "run/systemd" /usr/share/doc/elogind/README* 2>/dev/null | head -3; strings /usr/libexec/elogind/elogind 2>/dev/null | grep -E "^/run/systemd/(seats|sessions|users)" | sort -u'
           sec "polkit rules shipped" sh -c 'for f in /usr/share/polkit-1/rules.d/* /etc/polkit-1/rules.d/*; do echo "== $f"; cat "$f"; done' 
           sec "installed: polkit, elogind, agents, applet" dpkg-query -W -f='${Package} ${Version} ${Status}\n' polkitd pkexec policykit-1 libpam-elogind elogind libpolkit-agent-1-0 xfce-polkit mate-polkit lxpolkit policykit-1-gnome polkit-kde-agent-1 lxqt-policykit network-manager-gnome consolekit
