@@ -186,7 +186,7 @@ jobs:
           sec "polkit agents available" apt-cache policy xfce-polkit mate-polkit lxpolkit policykit-1-gnome lxqt-policykit network-manager-gnome connman-gtk cmst
           sec "who recommends polkitd" sh -c 'apt-cache rdepends --installed polkitd; apt-cache show xfce4-session lightdm network-manager elogind | grep -E "^(Package|Version|Depends|Recommends|Suggests):"'
           sec "pam.d lightdm" sh -c 'for f in /etc/pam.d/lightdm /etc/pam.d/lightdm-greeter /etc/pam.d/lightdm-autologin /etc/pam.d/common-session; do echo "== $f"; grep -v "^#" "$f" | grep -v "^$"; done; ls /usr/share/pam-configs; ls /lib/*/security/pam_elogind.so /usr/lib/*/security/pam_elogind.so /usr/lib/*/security/pam_systemd.so'
-          sec "xfce4-session shutdown backends" sh -c 'for b in /usr/bin/xfce4-session /usr/lib/*/xfce4/session/xfsm-shutdown-helper /usr/sbin/lightdm /usr/sbin/slick-greeter; do echo "== $b"; strings "$b" 2>/dev/null | grep -E "login1|ConsoleKit|PowerOff|Reboot|pkexec|shutdown" | sort -u | head -30; done'
+          sec "session shutdown backends" sh -c 'for b in /usr/bin/xfce4-session /usr/lib/*/xfce4/session/xfsm-shutdown-helper /usr/bin/mate-session /usr/sbin/lightdm /usr/sbin/slick-greeter; do echo "== $b"; strings "$b" 2>/dev/null | grep -E "login1|ConsoleKit|PowerOff|Reboot|pkexec|shutdown" | sort -u | head -30; done'
           sec "login1 polkit policy (power-off, reboot)" sh -c 'ls /usr/share/polkit-1/actions/ /etc/polkit-1/rules.d /usr/share/polkit-1/rules.d; python3 - <<EOF
           import xml.etree.ElementTree as ET, glob
           for f in glob.glob("/usr/share/polkit-1/actions/org.freedesktop.login1.policy"):
@@ -198,6 +198,11 @@ jobs:
           EOF'
           sec "xfce4-session xfconf defaults, xfdesktop backdrops" sh -c 'ls -la /usr/share/backgrounds /usr/share/backgrounds/* /usr/share/xfce4/backdrops 2>&1; find /etc/xdg/xfce4 -name "*.xml" | head; strings /usr/bin/xfdesktop | grep -iE "backdrop|backgrounds|\.(png|jpg|svg)$" | sort -u | head -20'
           sec "network-manager init script and NetworkManager.conf" sh -c 'ls -la /etc/init.d/network-manager /etc/rc2.d/*network* 2>&1; cat /etc/NetworkManager/NetworkManager.conf; ls /usr/share/dbus-1/system-services/'
-          sec "autostart entries (XFCE)" sh -c 'for f in /etc/xdg/autostart/*.desktop; do printf "%s: %s\n" "${f##*/}" "$(grep -E "^(Exec|OnlyShowIn|NotShowIn)=" "$f" | tr "\n" " ")"; done'
+          sec "MATE: session files, menu bar keys, wallpaper lists" sh -c 'ls /usr/share/xsessions; GSETTINGS_BACKEND=memory gsettings list-recursively org.mate.panel.menubar; GSETTINGS_BACKEND=memory gsettings get org.mate.background picture-filename; ls /usr/share/mate-background-properties; ls /usr/share/glib-2.0/schemas/*.override'
+          if [ -s brave.txt ]; then
+            apt-get install -y -q --no-install-recommends "$(cat brave.txt)" > brave-install.log 2>&1 || tail -20 brave-install.log
+            sec "Brave: desktop files, alternatives, mimeapps" sh -c 'dpkg -L "$(cat brave.txt)" | grep -E "applications/.*\.desktop$|/bin/"; update-alternatives --display x-www-browser; cat /etc/xdg/mimeapps.list /usr/share/applications/mimeapps.list 2>&1 | head -20'
+          fi
+          sec "autostart entries" sh -c 'for f in /etc/xdg/autostart/*.desktop; do printf "%s: %s\n" "${f##*/}" "$(grep -E "^(Exec|OnlyShowIn|NotShowIn)=" "$f" | tr "\n" " ")"; done'
           sec "lightdm config" sh -c 'grep -v "^#" /etc/lightdm/lightdm.conf | grep -v "^$"; ls /etc/lightdm /usr/share/lightdm/lightdm.conf.d 2>&1'
         shell: bash
