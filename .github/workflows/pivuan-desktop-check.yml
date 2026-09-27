@@ -149,8 +149,13 @@ jobs:
           printf 'allow-hotplug wlan0\niface wlan0 inet dhcp\n\twpa-ssid Pivuan Test\n\twpa-psk test-passphrase\n' > /etc/network/interfaces.d/wlan0
           fail=0
           if pivuan-config --api module_networkmanager status; then echo "::error::status says switched before the switch"; fail=1; fi
-          # DIALOG=bash: plain text instead of dialog boxes (no terminal here).
-          DIALOG=bash pivuan-config --api module_networkmanager switch --yes < /dev/null || true
+          # DIALOG=read: plain text instead of dialog boxes (no terminal here).
+          rc=0
+          DIALOG=read pivuan-config --debug=2:/tmp/pivuan-config.log --api module_networkmanager switch --yes < /dev/null || rc=$?
+          echo "switch exit status: $rc"
+          echo "::group::debug log"
+          grep -v '^+.*module_options\[' /tmp/pivuan-config.log | tail -n 150 || true
+          echo "::endgroup::"
           echo "::group::result"
           ls -la /etc/network/interfaces.d /etc/network/interfaces.pre-networkmanager /etc/NetworkManager/system-connections /etc/NetworkManager/conf.d || true
           cat /etc/NetworkManager/system-connections/*.nmconnection || true
