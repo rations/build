@@ -558,3 +558,22 @@ pivuan-config's netplan entries (basic setup, fallback DHCP, view configuration,
 - **Switch to NetworkManager** (console images) installs network-manager and runs the desktop install's ifupdown handover (`_module_desktops_ifupdown_to_networkmanager`), carrying the first-login Wi-Fi network over. It asks first and ignores SIGHUP so a dropped SSH session doesn't stop it halfway. Scriptable: `pivuan-config --api module_networkmanager switch --yes`.
 
 The desktop package check workflow tests the switch in the Devuan container.
+
+## 18. MATE as a second desktop
+
+Only desktops adapted for Devuan are offered: the configng parser marks a desktop unavailable on Devuan unless its YAML has a `devuan:` block. XFCE and MATE have one; GNOME, KDE, Cinnamon, i3 and the rest are hidden (menu and `--cmd`).
+
+MATE (`pivuan-config --cmd MATE01`) reuses the XFCE fixes:
+
+| XFCE fix | MATE |
+|---|---|
+| PulseAudio instead of PipeWire | same `devuan:` block |
+| xfce-polkit password dialog | mate-polkit (autostarts in MATE) |
+| nm-applet tray icon | network-manager-gnome is in MATE's list; the panel has a notification area |
+| Shutdown: polkit rule, LightDM outside the caller's session | shared, applies to any desktop on sysvinit |
+| Pivuan background, in the picker | dconf and schema override (postinst), `/usr/share/mate-background-properties/pivuan.xml` |
+| Pivuan menu icon | `org.mate.panel.menubar icon-name='pivuan'`, `/usr/share/pixmaps/pivuan.png` |
+| Brave Origin as the browser | same install; default through `/etc/xdg/mimeapps.list` (`brave-origin.desktop`) |
+| LightDM session | postinst sets `user-session=mate` (the shared greeter file names XFCE) |
+
+The wizard's tips list both commands. Checked in the Devuan container (desktop check with `inspect`): the package list resolves without systemd and exists for arm64.
