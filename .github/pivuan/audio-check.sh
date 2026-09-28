@@ -186,6 +186,8 @@ if [[ "${mode}" == pivuan-config ]]; then
 	grep -q '<StartupCommand>/usr/lib/pivuan/autostart' /etc/jwm/pivuan.jwmrc || error "JWM does not start /usr/lib/pivuan/autostart"
 	grep -q '<StartupCommand>picom .*--config /etc/pivuan/picom.conf' /etc/jwm/pivuan.jwmrc || error "JWM does not start picom with /etc/pivuan/picom.conf"
 	grep -qx 'shadow = false;' /etc/pivuan/picom.conf 2> /dev/null || error "no /etc/pivuan/picom.conf without shadows"
+	grep -qx 'backend = "xrender";' /etc/pivuan/picom.conf 2> /dev/null || error "/etc/pivuan/picom.conf does not use the xrender backend"
+	grep -q '<ResizeMode>outline</ResizeMode>' /etc/jwm/pivuan.jwmrc || error "JWM does not resize with an outline"
 	grep -q 'exec:pavucontrol' /etc/jwm/pivuan.jwmrc || error "the tray has no button for Volume Control"
 	grep -qx 'gtk-icon-theme-name=Numix' "${home}/.config/gtk-3.0/settings.ini" 2> /dev/null || error "GTK 3 does not use the Numix icons"
 	grep -q '^load-module module-udev-detect tsched=0' /etc/pulse/default.pa 2> /dev/null || error "PulseAudio's udev-detect lacks tsched=0 (HDMI)"
