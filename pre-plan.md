@@ -578,3 +578,22 @@ MATE (`pivuan-config --cmd MATE01`) reuses the XFCE fixes:
 | xfce4-terminal instead of terminator | mate-terminal; terminator removed, and the default terminal setting points at mate-terminal |
 
 The wizard's tips list both commands. Checked in the Devuan container (desktop check with `inspect`): the package list resolves without systemd and exists for arm64.
+
+## 19. Pivuan Audio (`pivuan-config --cmd AUDI01`)
+
+A third desktop for audio production: JWM on XLibre, JACK, no display manager, PulseAudio or PipeWire.
+
+| Part | Where |
+|---|---|
+| The nine audio apps as arm64 .debs, pinned commits | `.github/pivuan/apps/apps.conf`, `build-app.sh`, workflow `pivuan-apps.yml` (trixie container on the arm64 runner; `publish` adds them to the apt repository) |
+| gh-pages publishing shared by both workflows, leased push | `.github/pivuan/publish-pages.sh` |
+| Devuan keyring check shared by the image build and the audio check | `.github/pivuan/devuan-keyring.sh` |
+| Install check on real arm64 Devuan (mmdebstrap root as a container) | `pivuan-audio-check.yml`, `.github/pivuan/audio-check.sh`; mode `pivuan-config` runs the real desktop install and removal |
+| Desktop definition, postinst, JWM config | configng `yaml/audio.yaml`, `postinst/audio.sh`, `branding/jwm/pivuan.jwmrc` |
+| arm64 fixes upstream | simple-login-gui (x86-only hardening flag, launcher path follows PREFIX), DRUMix (aarch64 flush-to-zero); branch `claude/loving-fermi-gp2uoo` in each |
+
+Decisions:
+- XLibre from xlibre-debian's Devuan repository. Only `xserver-xlibre-core` (it has modesetting) and `xserver-xlibre-input-libinput`, not the `xlibre` metapackage with every video driver. The key is pinned by fingerprint (`repo.key_fingerprint`); pivuan-config refuses any other key.
+- Login: simple-login-gui's `xlogin-launcher` on tty1 in `/etc/inittab`, written last and only if xlogin and an X server run. The original inittab is kept in `/etc/armbian/desktop/audio.inittab` and restored on removal. No `telinit q`: the change takes effect at the next boot.
+- JWM runs no XDG autostart, so `/etc/jwm/pivuan.jwmrc` starts lxpolkit, nm-applet, blueman-applet and `audio-gui --restore`. Each user's `~/.jwmrc` includes it. Colours: the artwork's greys and red.
+- Realtime for JACK: jackd2's debconf answer writes `/etc/security/limits.d/audio.conf`; xlogin's PAM stack has pam_limits.
