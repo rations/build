@@ -127,7 +127,7 @@ jobs:
           touch "${RUNNER_TEMP}/summary.md"
           sudo docker run --rm \
             -v "${PWD}:/src:ro" -v "${RUNNER_TEMP}/keys:/keys:ro" -v "${RUNNER_TEMP}/summary.md:/summary.md" \
-            -e KEYS=/keys -e SUMMARY=/summary.md -e PIVUAN_APT_URL \
+            -e KEYS=/keys -e SUMMARY=/summary.md -e PIVUAN_APT_URL="${PIVUAN_APT_URL}" \
             -e PACKAGES="${AUDIO_PACKAGES} ${apps} ${EXTRA}" -e PIVUAN_APPS="${apps}" \
             pivuan-excalibur:check bash /src/.github/pivuan/audio-check.sh \
             || status=$?
