@@ -61,7 +61,8 @@ jobs:
         elogind libpam-elogind dbus ifupdown isc-dhcp-client wpasupplicant chrony sudo
       # mode packages: the Pivuan Audio set (pivuan-config takes it from configng's yaml/audio.yaml).
       AUDIO_PACKAGES: >-
-        xlibre xlibre-archive-keyring xinit x11-xserver-utils dbus-x11
+        xserver-xlibre-core xserver-xlibre-input-libinput xlibre-archive-keyring x11-xkb-utils
+        keyboard-configuration xinit x11-xserver-utils dbus-x11 libgl1-mesa-dri
         jwm lxterminal pcmanfm mousepad celluloid lxpolkit lxrandr lxappearance
         network-manager network-manager-gnome blueman bluez
         jackd2 alsa-utils libpulse0 adwaita-icon-theme fonts-dejavu-core udisks2 gvfs-backends
