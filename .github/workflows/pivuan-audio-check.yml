@@ -3,10 +3,16 @@
 # Devuan has no arm64 container image, so this builds one: mmdebstrap makes an excalibur arm64
 # root (the Pivuan base stack: sysvinit, elogind, eudev, ifupdown) from the Devuan archive,
 # checked with the pinned Devuan keys (.github/pivuan/devuan-keyring.sh), natively on GitHub's
-# arm64 runner. Docker then runs .github/pivuan/audio-check.sh in it, which adds the Pivuan and
-# xlibre-debian apt sources, installs the whole set for real and checks it: no systemd,
-# PulseAudio, PipeWire, LightDM or Xorg server; XLibre's server with modesetting and libinput;
-# every program and plug-in of the Pivuan apps finds its libraries.
+# arm64 runner. Docker then runs .github/pivuan/audio-check.sh in it, which installs Pivuan
+# Audio for real and checks it: no systemd, PulseAudio, PipeWire, LightDM or Xorg server;
+# XLibre's server with modesetting and libinput; every program and plug-in of the Pivuan apps
+# finds its libraries.
+#
+# mode "pivuan-config": the real desktop install, as on a Pi. pivuan-config is built from
+#   rations/configng (configng_ref) and runs "module_desktops install de=audio" (it adds the
+#   xlibre-debian source with the pinned key itself); then the login, session and realtime
+#   setup are checked, the desktop is removed, and /etc/inittab must be back as it was.
+# mode "packages": the package list below with the xlibre-debian source added by hand.
 #
 # The Pivuan apps must be published first ("Pivuan audio apps" with publish).
 #
@@ -23,8 +29,17 @@ name: Pivuan Audio install check
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "pivuan-config: install the desktop with pivuan-config; packages: the package list only"
+        type: choice
+        options: [pivuan-config, packages]
+        default: pivuan-config
+      configng_ref:
+        description: "rations/configng branch or tag (mode pivuan-config)"
+        type: string
+        default: pivuan
       extra_packages:
-        description: "More packages to install (space-separated)"
+        description: "More packages to install (space-separated; mode packages)"
         type: string
         default: ""
 
@@ -33,7 +48,7 @@ permissions:
 
 jobs:
   check:
-    name: Pivuan Audio on excalibur arm64
+    name: Pivuan Audio on excalibur arm64 (${{ inputs.mode }})
     runs-on: ubuntu-24.04-arm
     env:
       DEVUAN_KEY_FINGERPRINTS: ${{ vars.DEVUAN_KEY_FINGERPRINTS || '72E3CB773315DFA2E464743D94532124541922FB 9F8D6C74DE661075FD171BE3B3982868D104092C' }}
@@ -44,7 +59,7 @@ jobs:
       BASE_PACKAGES: >-
         devuan-keyring ca-certificates file sysvinit-core sysv-rc orphan-sysvinit-scripts eudev
         elogind libpam-elogind dbus ifupdown isc-dhcp-client wpasupplicant chrony sudo
-      # The Pivuan Audio set; configng's yaml/audio.yaml takes this list over.
+      # mode packages: the Pivuan Audio set (pivuan-config takes it from configng's yaml/audio.yaml).
       AUDIO_PACKAGES: >-
         xlibre xlibre-archive-keyring xinit x11-xserver-utils dbus-x11
         jwm lxterminal pcmanfm mousepad celluloid lxpolkit lxrandr lxappearance
@@ -57,6 +72,15 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends mmdebstrap gpg gpgv xz-utils
+
+      - name: Build pivuan-config
+        if: ${{ inputs.mode == 'pivuan-config' }}
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -q --no-install-recommends jq python3-yaml
+          git clone -q --depth 1 --branch "${{ inputs.configng_ref }}" https://github.com/rations/configng.git "${RUNNER_TEMP}/configng"
+          "${RUNNER_TEMP}/configng/tools/pivuan/build-deb.sh" "${RUNNER_TEMP}/deb"
+          ls -l "${RUNNER_TEMP}/deb"
 
       - name: Devuan keyring
         run: bash .github/pivuan/devuan-keyring.sh excalibur "${RUNNER_TEMP}/keys/devuan-archive-keyring.gpg"
@@ -120,15 +144,21 @@ jobs:
 
       - name: Install and check Pivuan Audio
         env:
+          MODE: ${{ inputs.mode }}
           EXTRA: ${{ inputs.extra_packages }}
         run: |
           set -euo pipefail
           apps="$(awk '!/^#/ && NF { print $1 }' .github/pivuan/apps/apps.conf | tr '\n' ' ')"
           touch "${RUNNER_TEMP}/summary.md"
+          mkdir -p "${RUNNER_TEMP}/deb"
+          deb="$(cd "${RUNNER_TEMP}/deb" && ls pivuan-config_*.deb 2> /dev/null || true)"
+          # sudo drops the environment: every value is passed explicitly.
           sudo docker run --rm \
-            -v "${PWD}:/src:ro" -v "${RUNNER_TEMP}/keys:/keys:ro" -v "${RUNNER_TEMP}/summary.md:/summary.md" \
-            -e KEYS=/keys -e SUMMARY=/summary.md -e PIVUAN_APT_URL="${PIVUAN_APT_URL}" \
+            -v "${PWD}:/src:ro" -v "${RUNNER_TEMP}/keys:/keys:ro" -v "${RUNNER_TEMP}/deb:/deb:ro" \
+            -v "${RUNNER_TEMP}/summary.md:/summary.md" \
+            -e MODE="${MODE}" -e KEYS=/keys -e SUMMARY=/summary.md -e PIVUAN_APT_URL="${PIVUAN_APT_URL}" \
             -e PACKAGES="${AUDIO_PACKAGES} ${apps} ${EXTRA}" -e PIVUAN_APPS="${apps}" \
+            -e PIVUAN_CONFIG_DEB="${deb:+/deb/${deb}}" \
             pivuan-excalibur:check bash /src/.github/pivuan/audio-check.sh \
             || status=$?
           cat "${RUNNER_TEMP}/summary.md" >> "${GITHUB_STEP_SUMMARY}"

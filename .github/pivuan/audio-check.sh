@@ -1,22 +1,32 @@
 #!/bin/bash
 #
-# Install the Pivuan Audio package set in a Devuan excalibur arm64 root and check it.
+# Install Pivuan Audio in a Devuan excalibur arm64 root and check it.
 # Runs as root inside that root (pivuan-audio-check.yml imports it as a container).
 #
-# Environment:
-#   PACKAGES        packages to install (no recommends, as pivuan-config installs desktops)
-#   PIVUAN_APPS     the Pivuan audio applications among them (from apps.conf)
-#   PIVUAN_APT_URL  the Pivuan apt repository
-#   KEYS            directory with pivuan-archive-keyring.gpg and NexusSfan.pgp (binary keyrings)
+# MODE=packages (default): add the Pivuan and xlibre-debian sources and install PACKAGES
+#   (no recommends, as pivuan-config installs desktops).
+# MODE=pivuan-config: as on a Pivuan image (Pivuan source only, a user, /etc/inittab),
+#   install the pivuan-config package PIVUAN_CONFIG_DEB and run
+#   "pivuan-config --api module_desktops install de=audio", which adds the xlibre-debian
+#   source itself. Then check what the desktop set up, remove it, and check that
+#   /etc/inittab is back as it was.
 #
-# Fails if apt can't resolve the set, if systemd, PulseAudio, PipeWire, LightDM or Xorg's own
-# server get installed, if the X server isn't XLibre's (with modesetting and libinput), or if
-# any program or plug-in of the Pivuan apps misses a library.
+# Environment:
+#   PIVUAN_APPS        the Pivuan audio applications (from apps.conf)
+#   PIVUAN_APT_URL     the Pivuan apt repository
+#   KEYS               directory with pivuan-archive-keyring.gpg and NexusSfan.pgp (binary keyrings)
+#   PACKAGES           MODE=packages: the packages to install
+#   PIVUAN_CONFIG_DEB  MODE=pivuan-config: the pivuan-config .deb
+#
+# Fails if the install fails, if systemd, PulseAudio, PipeWire, LightDM or Xorg's own server
+# get installed, if the X server isn't XLibre's (with modesetting and libinput), or if any
+# program or plug-in of the Pivuan apps misses a library.
 #
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
-: "${PACKAGES:?}" "${PIVUAN_APPS:?}" "${PIVUAN_APT_URL:?}" "${KEYS:?}"
+: "${PIVUAN_APPS:?}" "${PIVUAN_APT_URL:?}" "${KEYS:?}"
+mode="${MODE:-packages}"
 fail=0
 error() {
 	echo "::error::$*"
@@ -30,10 +40,8 @@ origin() {
 		{ f = ($1 == v || ($1 == "***" && $2 == v)) }'
 }
 
-# 1. Sources, as the Pivuan Audio install will write them. The user's own XLibre setup uses
-#    the same xlibre-debian source and key file name.
+# 1. The Pivuan source, as the image has it (extensions/pivuan-apt.sh).
 install -m 0644 "${KEYS}/pivuan-archive-keyring.gpg" /usr/share/keyrings/pivuan-archive-keyring.gpg
-install -m 0644 "${KEYS}/NexusSfan.pgp" /usr/share/keyrings/NexusSfan.pgp
 cat > /etc/apt/sources.list.d/pivuan.sources << EOF
 Types: deb
 URIs: ${PIVUAN_APT_URL}
@@ -41,15 +49,41 @@ Suites: excalibur
 Components: main
 Signed-By: /usr/share/keyrings/pivuan-archive-keyring.gpg
 EOF
-cat > /etc/apt/sources.list.d/xlibre-debian.sources << EOF
-Types: deb
-URIs: https://xlibre-debian.github.io/devuan/
-Suites: main
-Components: stable
-Architectures: arm64
-Signed-By: /usr/share/keyrings/NexusSfan.pgp
-EOF
-apt-get update -q
+
+if [[ "${mode}" == packages ]]; then
+	# 2. The xlibre-debian source as the user's own XLibre setup has it, and the package set.
+	install -m 0644 "${KEYS}/NexusSfan.pgp" /usr/share/keyrings/NexusSfan.pgp
+	printf '%s\n' "Types: deb" "URIs: https://xlibre-debian.github.io/devuan/" "Suites: main" \
+		"Components: stable" "Architectures: arm64" "Signed-By: /usr/share/keyrings/NexusSfan.pgp" \
+		> /etc/apt/sources.list.d/xlibre-debian.sources
+	apt-get update -q
+	# shellcheck disable=SC2086 # a word list
+	if ! apt-get install -y -q --no-install-recommends ${PACKAGES:?} 2>&1 | tee /tmp/install.log; then
+		echo "::error::apt-get could not install the Pivuan Audio package set"
+		exit 1
+	fi
+else
+	# 2. As on a Pivuan image: the first user (armbian-firstlogin), then pivuan-config.
+	useradd -m -u 1000 -s /bin/bash -G sudo,audio pivuan
+	cp -p /etc/inittab /tmp/inittab.orig
+	apt-get update -q
+	apt-get install -y -q --no-install-recommends "${PIVUAN_CONFIG_DEB:?}"
+	rc=0
+	DIALOG="read" pivuan-config --debug=2:/tmp/pivuan-config.log --api module_desktops install de=audio tier=minimal \
+		< /dev/null 2>&1 | tee /tmp/install.log || rc=$?
+	if ((rc)) || ! grep -q '^audio installed\.$' /tmp/install.log; then
+		echo "::group::pivuan-config debug log"
+		grep -v '^+.*module_options\[' /tmp/pivuan-config.log | tail -n 200 || true
+		echo "::endgroup::"
+		echo "::error::pivuan-config module_desktops install de=audio failed (exit status ${rc})"
+		exit 1
+	fi
+	grep -q 'reboot to start the graphical login' /tmp/install.log || error "the install did not say to reboot"
+fi
+
+# From here on every check reports through error() and the script goes on, so one run lists
+# every problem.
+set +e
 
 echo "::group::XLibre packages for arm64 in xlibre-debian"
 xlibre_index="$(ls /var/lib/apt/lists/*xlibre-debian*_binary-arm64_Packages 2> /dev/null)" \
@@ -69,13 +103,6 @@ echo "::endgroup::"
 	apt-cache show xlibre 2> /dev/null | grep -E '^(Version|Depends|Recommends|Conflicts|Replaces|Provides):' || echo "no package xlibre"
 	echo '```'
 } | while IFS= read -r line; do summary "${line}"; done
-
-# 2. The real install.
-# shellcheck disable=SC2086 # a word list
-if ! apt-get install -y -q --no-install-recommends ${PACKAGES} 2>&1 | tee /tmp/install.log; then
-	echo "::error::apt-get could not install the Pivuan Audio package set"
-	exit 1
-fi
 
 # 3. What must not be there.
 for pkg in systemd systemd-sysv pulseaudio pipewire pipewire-bin pipewire-pulse wireplumber lightdm xserver-xorg-core; do
@@ -106,7 +133,7 @@ else
 	fi
 fi
 for drv in modesetting_drv.so libinput_drv.so; do
-	found="$(find /usr/lib/xorg/modules /usr/lib/xlibre -name "${drv}" 2> /dev/null | head -1)"
+	found="$(find /usr/lib/xorg/modules -name "${drv}" -print -quit 2> /dev/null)"
 	if [[ -z "${found}" ]]; then
 		error "no ${drv} installed"
 	else
@@ -132,7 +159,65 @@ else
 	error "jackd does not run: ${version}"
 fi
 
-# 6. What was installed: every package whose version isn't from Devuan, and the totals.
+# 6. What pivuan-config set up for the desktop, and that removing it undoes the login change.
+if [[ "${mode}" == pivuan-config ]]; then
+	home=/home/pivuan
+	# The xlibre-debian source, with the pinned key.
+	grep -q 'xlibre-debian.github.io/devuan/ main stable' /etc/apt/sources.list.d/audio.list 2> /dev/null \
+		|| error "no xlibre-debian source in /etc/apt/sources.list.d/audio.list"
+	key="$(gpg --batch --with-colons --show-keys /usr/share/keyrings/NexusSfan.pgp 2> /dev/null | awk -F: '$1 == "fpr" { print $10; exit }')"
+	summary "- xlibre-debian key installed by pivuan-config: \`${key:-none}\`"
+	# Login: xlogin-launcher on tty1, text logins on tty2-6, the original kept.
+	grep -qx '1:2345:respawn:/usr/bin/xlogin-launcher' /etc/inittab || error "tty1 does not start xlogin-launcher"
+	if grep -qE '^1:[0-9]*:respawn:.*getty' /etc/inittab; then error "tty1 still has an active getty"; fi
+	for vt in 2 3 4 5 6; do
+		grep -qE "^${vt}:[0-9]*:respawn:.*getty.*tty${vt}" /etc/inittab || error "tty${vt} lost its getty"
+	done
+	cmp -s /tmp/inittab.orig /etc/armbian/desktop/audio.inittab || error "the inittab backup is not the original"
+	grep -q "^XLOGIN_BACKGROUND='pivuan-background.png'" /etc/xlogin.conf 2> /dev/null || error "no /etc/xlogin.conf with the Pivuan background"
+	[[ "$(stat -c '%U %a' /usr/share/xlogin/backgrounds/pivuan-background.png 2> /dev/null)" == "root 644" ]] \
+		|| error "the login background is missing or not root-owned 0644"
+	compgen -G "/etc/rc2.d/S*seatd" > /dev/null || error "seatd is not enabled"
+	# Session.
+	jwm -p -f /etc/jwm/pivuan.jwmrc > /tmp/jwm-parse.log 2>&1 || true
+	if [[ -s /tmp/jwm-parse.log ]]; then cat /tmp/jwm-parse.log; error "jwm reports problems in /etc/jwm/pivuan.jwmrc"; fi
+	for f in .xinitrc .jwmrc; do
+		[[ "$(stat -c %U "${home}/${f}" 2> /dev/null)" == pivuan ]] || error "${home}/${f} missing or not the user's"
+	done
+	if [[ ! -x "${home}/.xinitrc" ]] || ! grep -qx 'exec dbus-run-session jwm' "${home}/.xinitrc"; then
+		error "${home}/.xinitrc does not start JWM"
+	fi
+	(cd "${home}" && HOME="${home}" jwm -p > /tmp/jwm-parse-user.log 2>&1) || true
+	if [[ -s /tmp/jwm-parse-user.log ]]; then cat /tmp/jwm-parse-user.log; error "jwm reports problems in ~/.jwmrc"; fi
+	# Realtime for JACK, and the user's groups.
+	grep -qE '^@audio +- +rtprio +[0-9]+' /etc/security/limits.d/audio.conf 2> /dev/null || error "no realtime limits for @audio"
+	id -nG pivuan | tr ' ' '\n' | grep -qx audio || error "the user is not in the audio group"
+	# Browser (Brave's own repository; a failure there only skips the browser).
+	if dpkg-query -W -f '${db:Status-Status}' brave-origin 2> /dev/null | grep -qx installed; then
+		summary "- brave-origin $(dpkg-query -W -f '${Version}' brave-origin)"
+	else
+		echo "::warning::brave-origin was not installed"
+		summary "- brave-origin: **not installed**"
+	fi
+	pivuan-config --api module_desktops status de=audio || error "module_desktops status says audio is not installed"
+	summary "- /etc/inittab after the install: \`$(grep -E '^[1-6]:' /etc/inittab | tr '\n' ' ')\`"
+
+	# Remove it again.
+	rc=0
+	DIALOG="read" pivuan-config --api module_desktops remove de=audio < /dev/null > /tmp/remove.log 2>&1 || rc=$?
+	tail -n 20 /tmp/remove.log
+	((rc == 0)) || error "module_desktops remove de=audio failed (exit status ${rc})"
+	cmp -s /tmp/inittab.orig /etc/inittab || error "/etc/inittab is not back to the original after the removal"
+	if [[ -e /etc/armbian/desktop/audio.inittab ]]; then error "the inittab backup was left behind"; fi
+	if dpkg-query -W -f '${db:Status-Status}' simple-login-gui 2> /dev/null | grep -qx installed; then
+		error "simple-login-gui is still installed"
+	fi
+	summary "- Removal: /etc/inittab restored, packages removed"
+	# The checks above ran against the installed desktop; stop before the package summary.
+	exit "${fail}"
+fi
+
+# 7. What was installed: every package whose version isn't from Devuan, and the totals.
 {
 	echo ""
 	echo "### Packages not from Devuan"
