@@ -84,7 +84,9 @@ from_project_deb() { # <build-deb.sh arguments>...
 # A project's release tarball (scripts/makedist-linux.sh), unpacked.
 from_tarball() { # <glob in dist/>
 	local tarball
-	tarball="$(ls "${src}"/dist/$1 | head -1)"
+	# shellcheck disable=SC2206 # $1 is a glob
+	local matches=("${src}"/dist/$1)
+	tarball="${matches[0]}"
 	[[ -f "${tarball}" ]] || die "no release tarball matching dist/$1"
 	mkdir -p "${work}/dist"
 	tar -xzf "${tarball}" -C "${work}/dist"
@@ -184,7 +186,8 @@ case "${pkg}" in
 		depends="pkexec, polkitd"
 		cmake -S "${src}" -B "${src}/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
 		cmake --build "${src}/build" -j"${jobs}"
-		[[ ! -x "${src}/build/coretest" ]] || "${src}/build/coretest"
+		# coretest finds tests/fixtures relative to the working directory (CMakeLists add_test).
+		[[ ! -x "${src}/build/coretest" ]] || (cd "${src}" && build/coretest)
 		DESTDIR="${stage}" cmake --install "${src}/build"
 		;;
 	simple-login-gui)
@@ -217,6 +220,11 @@ install -d "${stage}/usr/share/doc/${pkg}"
 	done
 } > "${stage}/usr/share/doc/${pkg}/copyright"
 rm -f "${stage}/usr/share/doc/${pkg}/copyright.gz"
+# changelog.Debian (unless the project's own .deb has one), dated from the pinned commit so
+# rebuilds are identical.
+[[ -f "${stage}/usr/share/doc/${pkg}/changelog.Debian.gz" ]] || printf '%s (%s) excalibur; urgency=medium\n\n  * Built from %s at %s.\n\n -- Pivuan <https://github.com/rations/pivuan>  %s\n' \
+	"${pkg}" "${version}" "${repo}" "${commit}" "$(git -C "${src}" log -1 --format=%cD "${commit}")" \
+	| gzip -9n > "${stage}/usr/share/doc/${pkg}/changelog.Debian.gz"
 
 # Every ELF must be for this architecture; strip them.
 mapfile -t elfs < <(find "${stage}" -type f -exec sh -c 'file -b "$1" | grep -q "^ELF" && echo "$1"' _ {} \;)

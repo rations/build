@@ -93,10 +93,14 @@ jobs:
         run: |
           set -euo pipefail
           deb="$(ls out/*.deb)"
+          echo "::group::${deb}: control and files"
+          dpkg-deb -I "${deb}"
+          dpkg-deb -c "${deb}"
+          echo "::endgroup::"
           apt-get install -y -q --no-install-recommends "./${deb}"
           fail=0
           while IFS= read -r f; do
-            [[ -f "${f}" ]] && file -b "${f}" | grep -q '^ELF' || continue
+            if [[ ! -f "${f}" ]] || ! file -b "${f}" | grep -q '^ELF'; then continue; fi
             if ldd "${f}" 2>&1 | grep -q 'not found'; then
               echo "::error::${f}: $(ldd "${f}" | grep 'not found' | tr '\n' ' ')"
               fail=1
