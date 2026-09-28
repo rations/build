@@ -99,7 +99,11 @@ else
 	echo "X server: ${xserver} from ${xpkg} ${xver} (${origin})"
 	summary "- X server: \`${xserver}\` from \`${xpkg} ${xver}\` (${origin})"
 	[[ "${origin}" == *xlibre-debian* ]] || error "the X server ${xpkg} ${xver} does not come from xlibre-debian (${origin})"
-	"${xserver}" -version 2>&1 | head -5 || error "${xserver} -version failed"
+	if version="$("${xserver}" -version 2>&1)"; then
+		head -n 3 <<< "${version}"
+	else
+		error "${xserver} -version failed: ${version}"
+	fi
 fi
 for drv in modesetting_drv.so libinput_drv.so; do
 	found="$(find /usr/lib/xorg/modules /usr/lib/xlibre -name "${drv}" 2> /dev/null | head -1)"
@@ -122,7 +126,11 @@ for app in ${PIVUAN_APPS}; do
 	done < <(dpkg -L "${app}")
 done
 [[ -x /usr/bin/xlogin-launcher ]] || error "no /usr/bin/xlogin-launcher"
-jackd --version 2>&1 | head -2 || error "jackd does not run"
+if version="$(jackd --version 2>&1)"; then
+	head -n 2 <<< "${version}"
+else
+	error "jackd does not run: ${version}"
+fi
 
 # 6. What was installed: every package whose version isn't from Devuan, and the totals.
 {
