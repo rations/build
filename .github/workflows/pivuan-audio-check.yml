@@ -1,0 +1,133 @@
+# Check that the Pivuan Audio desktop's packages install on real arm64 Devuan excalibur.
+#
+# Devuan has no arm64 container image, so this builds one: mmdebstrap makes an excalibur arm64
+# root (the Pivuan base stack: sysvinit, elogind, eudev, ifupdown) from the Devuan archive,
+# checked with the pinned Devuan keys (.github/pivuan/devuan-keyring.sh), natively on GitHub's
+# arm64 runner. Docker then runs .github/pivuan/audio-check.sh in it, which adds the Pivuan and
+# xlibre-debian apt sources, installs the whole set for real and checks it: no systemd,
+# PulseAudio, PipeWire, LightDM or Xorg server; XLibre's server with modesetting and libinput;
+# every program and plug-in of the Pivuan apps finds its libraries.
+#
+# The Pivuan apps must be published first ("Pivuan audio apps" with publish).
+#
+# Keys:
+#   Pivuan    the public half of the PIVUAN_APT_SIGNING_KEY secret (as the image build does).
+#   XLibre    https://mrchicken.nexussfan.cz/publickey.asc (NexusSfan, who publishes
+#             xlibre-debian). Pin it with the repository variable XLIBRE_KEY_FINGERPRINT after
+#             comparing with `gpg --show-keys /usr/share/keyrings/NexusSfan.pgp` on a machine you
+#             trust; until then the run warns and prints the fingerprint it used.
+#   Devuan    DEVUAN_KEY_FINGERPRINTS, as in pivuan-build.yml.
+
+name: Pivuan Audio install check
+
+on:
+  workflow_dispatch:
+    inputs:
+      extra_packages:
+        description: "More packages to install (space-separated)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Pivuan Audio on excalibur arm64
+    runs-on: ubuntu-24.04-arm
+    env:
+      DEVUAN_KEY_FINGERPRINTS: ${{ vars.DEVUAN_KEY_FINGERPRINTS || '72E3CB773315DFA2E464743D94532124541922FB 9F8D6C74DE661075FD171BE3B3982868D104092C' }}
+      XLIBRE_KEY_URL: https://mrchicken.nexussfan.cz/publickey.asc
+      XLIBRE_KEY_FINGERPRINT: ${{ vars.XLIBRE_KEY_FINGERPRINT }}
+      PIVUAN_APT_URL: https://rations.github.io/pivuan
+      # The Pivuan base stack, as on the image (see pivuan-desktop-check.yml).
+      BASE_PACKAGES: >-
+        devuan-keyring ca-certificates file sysvinit-core sysv-rc orphan-sysvinit-scripts eudev
+        elogind libpam-elogind dbus ifupdown isc-dhcp-client wpasupplicant chrony sudo
+      # The Pivuan Audio set; configng's yaml/audio.yaml takes this list over.
+      AUDIO_PACKAGES: >-
+        xlibre xlibre-archive-keyring xinit x11-xserver-utils dbus-x11
+        jwm lxterminal pcmanfm mousepad celluloid lxpolkit lxrandr lxappearance
+        network-manager network-manager-gnome blueman bluez
+        jackd2 alsa-utils libpulse0 adwaita-icon-theme fonts-dejavu-core udisks2 gvfs-backends
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Host tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends mmdebstrap gpg gpgv xz-utils
+
+      - name: Devuan keyring
+        run: bash .github/pivuan/devuan-keyring.sh excalibur "${RUNNER_TEMP}/keys/devuan-archive-keyring.gpg"
+
+      - name: Pivuan and XLibre keys
+        env:
+          SIGNING_KEY: ${{ secrets.PIVUAN_APT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          keys="${RUNNER_TEMP}/keys"
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -m 700 "${GNUPGHOME}"
+
+          [[ -n "${SIGNING_KEY}" ]] || { echo "::error::the PIVUAN_APT_SIGNING_KEY secret is not set"; exit 1; }
+          gpg --batch --quiet --import <<< "${SIGNING_KEY}"
+          pivuan_fpr="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
+          gpg --batch --export "${pivuan_fpr}" > "${keys}/pivuan-archive-keyring.gpg"
+
+          curl -fsSL --retry 3 "${XLIBRE_KEY_URL}" -o "${RUNNER_TEMP}/xlibre.asc"
+          gpg --batch --yes --dearmor -o "${keys}/NexusSfan.pgp" "${RUNNER_TEMP}/xlibre.asc"
+          mapfile -t xlibre_fprs < <(gpg --batch --with-colons --show-keys "${keys}/NexusSfan.pgp" | awk -F: '$1 == "pub" { p = 1; next } p && $1 == "fpr" { print $10; p = 0 }')
+          echo "XLibre key: ${xlibre_fprs[*]}"
+          pinned="$(tr '[:lower:]' '[:upper:]' <<< "${XLIBRE_KEY_FINGERPRINT// /}")"
+          if [[ -n "${pinned}" ]]; then
+            [[ "${#xlibre_fprs[@]}" == 1 && "${xlibre_fprs[0]}" == "${pinned}" ]] \
+              || { echo "::error::${XLIBRE_KEY_URL} is not the key XLIBRE_KEY_FINGERPRINT pins (it has: ${xlibre_fprs[*]})"; exit 1; }
+            trust="pinned by XLIBRE_KEY_FINGERPRINT"
+          else
+            trust="**not pinned** (trust on first use)"
+            echo "::warning::XLIBRE_KEY_FINGERPRINT is not set; using ${XLIBRE_KEY_URL} unpinned. See the run summary."
+          fi
+          {
+            echo "## Keys"
+            echo ""
+            echo "- Pivuan: \`${pivuan_fpr}\`"
+            echo "- XLibre (${XLIBRE_KEY_URL}): ${trust}"
+            echo ""
+            echo "Compare with \`gpg --show-keys /usr/share/keyrings/NexusSfan.pgp\` on your XLibre machine, then put the fingerprint in the repository variable \`XLIBRE_KEY_FINGERPRINT\`:"
+            echo ""
+            echo '```'
+            gpg --batch --show-keys --with-fingerprint "${keys}/NexusSfan.pgp"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Build the excalibur arm64 root
+        run: |
+          set -euo pipefail
+          keys="${RUNNER_TEMP}/keys"
+          # The root's apt uses only the pinned Devuan keys, like the host did.
+          # shellcheck disable=SC2086 # word lists
+          sudo mmdebstrap --variant=minbase --architectures=arm64 \
+            --keyring="${keys}/devuan-archive-keyring.gpg" \
+            --include="$(tr -s ' ' ',' <<< "${BASE_PACKAGES}")" \
+            --customize-hook="install -m 0644 '${keys}/devuan-archive-keyring.gpg' \"\$1/usr/share/keyrings/pivuan-check-devuan.gpg\"" \
+            --customize-hook='echo "deb [signed-by=/usr/share/keyrings/pivuan-check-devuan.gpg] http://deb.devuan.org/merged excalibur main" > "$1/etc/apt/sources.list"' \
+            excalibur "${RUNNER_TEMP}/root.tar" http://deb.devuan.org/merged
+          sudo docker import "${RUNNER_TEMP}/root.tar" pivuan-excalibur:check
+          sudo rm -f "${RUNNER_TEMP}/root.tar"
+
+      - name: Install and check Pivuan Audio
+        env:
+          EXTRA: ${{ inputs.extra_packages }}
+        run: |
+          set -euo pipefail
+          apps="$(awk '!/^#/ && NF { print $1 }' .github/pivuan/apps/apps.conf | tr '\n' ' ')"
+          touch "${RUNNER_TEMP}/summary.md"
+          sudo docker run --rm \
+            -v "${PWD}:/src:ro" -v "${RUNNER_TEMP}/keys:/keys:ro" -v "${RUNNER_TEMP}/summary.md:/summary.md" \
+            -e KEYS=/keys -e SUMMARY=/summary.md -e PIVUAN_APT_URL \
+            -e PACKAGES="${AUDIO_PACKAGES} ${apps} ${EXTRA}" -e PIVUAN_APPS="${apps}" \
+            pivuan-excalibur:check bash /src/.github/pivuan/audio-check.sh \
+            || status=$?
+          cat "${RUNNER_TEMP}/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+          exit "${status:-0}"
