@@ -203,6 +203,8 @@ if [[ "${mode}" == pivuan-config ]]; then
 		fi
 		missing_icons+=("${icon}")
 	done < <(grep -o 'icon="[^"]*"' /etc/jwm/pivuan.jwmrc | cut -d'"' -f2 | sort -u)
+	# Numix's icons are SVG: JWM draws them only when built with librsvg.
+	ldd /usr/bin/jwm 2> /dev/null | grep -q 'librsvg' || error "jwm is built without SVG support (librsvg): Numix's icons would not show"
 	if ((${#missing_icons[@]})); then
 		error "menu icons not found in JWM's IconPaths: ${missing_icons[*]}"
 	fi
