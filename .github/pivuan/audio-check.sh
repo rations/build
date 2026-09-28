@@ -3,24 +3,25 @@
 # Install Pivuan Audio in a Devuan excalibur arm64 root and check it.
 # Runs as root inside that root (pivuan-audio-check.yml imports it as a container).
 #
-# MODE=packages (default): add the Pivuan and xlibre-debian sources and install PACKAGES
-#   (no recommends, as pivuan-config installs desktops).
+# MODE=packages (default): add the Pivuan source and install PACKAGES (no recommends, as
+#   pivuan-config installs desktops).
 # MODE=pivuan-config: as on a Pivuan image (Pivuan source only, a user, /etc/inittab),
 #   install the pivuan-config package PIVUAN_CONFIG_DEB and run
-#   "pivuan-config --api module_desktops install de=audio", which adds the xlibre-debian
-#   source itself. Then check what the desktop set up, remove it, and check that
-#   /etc/inittab is back as it was.
+#   "pivuan-config --api module_desktops install de=audio". Then check what the desktop set
+#   up, remove it, and check that /etc/inittab is back as it was.
 #
 # Environment:
 #   PIVUAN_APPS        the Pivuan audio applications (from apps.conf)
 #   PIVUAN_APT_URL     the Pivuan apt repository
-#   KEYS               directory with pivuan-archive-keyring.gpg and NexusSfan.pgp (binary keyrings)
+#   KEYS               directory with pivuan-archive-keyring.gpg (binary keyring)
 #   PACKAGES           MODE=packages: the packages to install
 #   PIVUAN_CONFIG_DEB  MODE=pivuan-config: the pivuan-config .deb
 #
-# Fails if the install fails, if systemd, PulseAudio, PipeWire, LightDM or Xorg's own server
-# get installed, if the X server isn't XLibre's (with modesetting and libinput), or if any
-# program or plug-in of the Pivuan apps misses a library.
+# Fails if the install fails, if systemd, PipeWire, LightDM, Audio-Gui or Xorg's own server
+# get installed, if PulseAudio (with its JACK and Bluetooth modules) or the compositor is
+# missing, if the X server isn't Pivuan's XLibre build (with modesetting, glamor and
+# libinput), if a menu icon is missing, or if any program or plug-in of the Pivuan apps misses
+# a library.
 #
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -54,11 +55,7 @@ Signed-By: /usr/share/keyrings/pivuan-archive-keyring.gpg
 EOF
 
 if [[ "${mode}" == packages ]]; then
-	# 2. The xlibre-debian source as the user's own XLibre setup has it, and the package set.
-	install -m 0644 "${KEYS}/NexusSfan.pgp" /usr/share/keyrings/NexusSfan.pgp
-	printf '%s\n' "Types: deb" "URIs: https://xlibre-debian.github.io/devuan/" "Suites: main" \
-		"Components: stable" "Architectures: arm64" "Signed-By: /usr/share/keyrings/NexusSfan.pgp" \
-		> /etc/apt/sources.list.d/xlibre-debian.sources
+	# 2. The package set.
 	apt-get update -q
 	# shellcheck disable=SC2086 # a word list
 	if ! apt-get install -y -q --no-install-recommends ${PACKAGES:?} 2>&1 | tee /tmp/install.log; then
@@ -81,41 +78,30 @@ else
 		echo "::error::pivuan-config module_desktops install de=audio failed (exit status ${rc})"
 		exit 1
 	fi
-	grep -q 'reboot to start the graphical login' /tmp/install.log || error "the install did not say to reboot"
+	# In a container nothing reloads /etc/inittab; on a Pi the login screen starts right away.
+	grep -q 'reboot to start the graphical login' /tmp/install.log || error "the install did not report how the login screen starts"
 fi
 
 # From here on every check reports through error() and the script goes on, so one run lists
 # every problem.
 set +e
 
-echo "::group::XLibre packages for arm64 in xlibre-debian"
-xlibre_index="$(ls /var/lib/apt/lists/*xlibre-debian*_binary-arm64_Packages 2> /dev/null)" \
-	|| { echo "::error::xlibre-debian has no arm64 package index"; exit 1; }
-awk '/^Package: /{p=$2} /^Version: /{print p " " $2}' "${xlibre_index}" | sort
-echo "::endgroup::"
-{
-	echo "## XLibre packages for arm64 (xlibre-debian)"
-	echo ""
-	echo '```'
-	awk '/^Package: /{p=$2} /^Version: /{print p " " $2}' "${xlibre_index}" | sort
-	echo '```'
-	echo ""
-	echo "### xlibre"
-	echo ""
-	echo '```'
-	apt-cache show xlibre 2> /dev/null | grep -E '^(Version|Depends|Recommends|Conflicts|Replaces|Provides):' || echo "no package xlibre"
-	echo '```'
-} | while IFS= read -r line; do summary "${line}"; done
-
 # 3. What must not be there.
-for pkg in systemd systemd-sysv pulseaudio pipewire pipewire-bin pipewire-pulse wireplumber lightdm xserver-xorg-core; do
-	if dpkg-query -W -f '${db:Status-Status}' "${pkg}" 2> /dev/null | grep -qx installed; then
-		error "${pkg} is installed"
-	fi
+installed() { dpkg-query -W -f '${db:Status-Status}' "$1" 2> /dev/null | grep -qx installed; }
+for pkg in systemd systemd-sysv pipewire pipewire-bin pipewire-pulse wireplumber lightdm xserver-xorg-core audio-gui; do
+	if installed "${pkg}"; then error "${pkg} is installed"; fi
+done
+if grep -rhs '^[^#]*\(xlibre-debian\|backports\)' /etc/apt/sources.list /etc/apt/sources.list.d/; then
+	error "an xlibre-debian or backports source is configured"
+fi
+# What must be: PulseAudio for HDMI, Bluetooth and ordinary programs (and into JACK), the
+# compositor, the icon theme.
+for pkg in pulseaudio pulseaudio-utils pulseaudio-module-bluetooth pulseaudio-module-jack pavucontrol pasystray picom numix-icon-theme; do
+	installed "${pkg}" || error "${pkg} is not installed"
 done
 
-# 4. The X server comes from xlibre-debian, with the drivers the Pi 5 needs (99-vc4.conf:
-#    modesetting; input: libinput).
+# 4. The X server is Pivuan's XLibre build (rations/pivuan, xlibre/) from the Pivuan
+#    repository, with what the Pi 5 needs (99-vc4.conf: modesetting, with glamor; libinput).
 xserver=""
 for bin in /usr/bin/Xlibre /usr/bin/Xorg /usr/lib/xorg/Xorg; do
 	[[ -x "${bin}" ]] && { xserver="${bin}"; break; }
@@ -128,14 +114,15 @@ else
 	origin="$(origin "${xpkg}" "${xver}")"
 	echo "X server: ${xserver} from ${xpkg} ${xver} (${origin})"
 	summary "- X server: \`${xserver}\` from \`${xpkg} ${xver}\` (${origin})"
-	[[ "${origin}" == *xlibre-debian* ]] || error "the X server ${xpkg} ${xver} does not come from xlibre-debian (${origin})"
+	[[ "${origin}" == "${PIVUAN_APT_URL}"* && "${xver}" == *+pivuan* ]] \
+		|| error "the X server ${xpkg} ${xver} is not Pivuan's XLibre build from ${PIVUAN_APT_URL} (${origin})"
 	if version="$("${xserver}" -version 2>&1)"; then
 		head -n 3 <<< "${version}"
 	else
 		error "${xserver} -version failed: ${version}"
 	fi
 fi
-for drv in modesetting_drv.so libinput_drv.so; do
+for drv in modesetting_drv.so libglamoregl.so libinput_drv.so; do
 	found="$(find /usr/lib/xorg/modules -name "${drv}" -print -quit 2> /dev/null)"
 	if [[ -z "${found}" ]]; then
 		error "no ${drv} installed"
@@ -165,11 +152,6 @@ fi
 # 6. What pivuan-config set up for the desktop, and that removing it undoes the login change.
 if [[ "${mode}" == pivuan-config ]]; then
 	home=/home/pivuan
-	# The xlibre-debian source, with the pinned key.
-	grep -q 'xlibre-debian.github.io/devuan/ main stable' /etc/apt/sources.list.d/audio.list 2> /dev/null \
-		|| error "no xlibre-debian source in /etc/apt/sources.list.d/audio.list"
-	key="$(gpg --batch --with-colons --show-keys /usr/share/keyrings/NexusSfan.pgp 2> /dev/null | awk -F: '$1 == "fpr" { print $10; exit }')"
-	summary "- xlibre-debian key installed by pivuan-config: \`${key:-none}\`"
 	# Login: xlogin-launcher on tty1, text logins on tty2-6, the original kept.
 	grep -qx '1:2345:respawn:/usr/bin/xlogin-launcher' /etc/inittab || error "tty1 does not start xlogin-launcher"
 	if grep -qE '^1:[0-9]*:respawn:.*getty' /etc/inittab; then error "tty1 still has an active getty"; fi
@@ -190,6 +172,41 @@ if [[ "${mode}" == pivuan-config ]]; then
 	if [[ ! -x "${home}/.xinitrc" ]] || ! grep -qx 'exec dbus-run-session jwm' "${home}/.xinitrc"; then
 		error "${home}/.xinitrc does not start JWM"
 	fi
+	grep -q '/usr/lib/pivuan/audio-session' "${home}/.xinitrc" 2> /dev/null || error "${home}/.xinitrc does not run /usr/lib/pivuan/audio-session"
+	for f in /usr/lib/pivuan/audio-session /usr/lib/pivuan/pulse-session; do
+		[[ -x "${f}" ]] || error "no ${f}"
+	done
+	grep -q '/usr/lib/pivuan/pulse-session' /etc/jwm/pivuan.jwmrc || error "JWM does not start /usr/lib/pivuan/pulse-session"
+	grep -q '^[^#]*picom' /etc/jwm/pivuan.jwmrc || error "JWM does not start picom"
+	grep -qx 'gtk-icon-theme-name=Numix' "${home}/.config/gtk-3.0/settings.ini" 2> /dev/null || error "GTK 3 does not use the Numix icons"
+	grep -q '^load-module module-udev-detect tsched=0' /etc/pulse/default.pa 2> /dev/null || error "PulseAudio's udev-detect lacks tsched=0 (HDMI)"
+	# The login-time script: the folders and pcmanfm bookmarks, for the user.
+	su -l -s /bin/sh -c /usr/lib/pivuan/audio-session pivuan || error "/usr/lib/pivuan/audio-session failed"
+	for d in Downloads Documents Music Videos NAM "Impulse Responses" .vst3 .lv2; do
+		[[ "$(stat -c %U "${home}/${d}" 2> /dev/null)" == pivuan ]] || error "${home}/${d} missing or not the user's"
+	done
+	[[ "$(grep -c '^file://' "${home}/.config/gtk-3.0/bookmarks" 2> /dev/null)" == 8 ]] || error "pcmanfm does not have the 8 bookmarks"
+	# Every menu icon is a file in one of JWM's IconPaths (JWM looks nowhere else).
+	mapfile -t iconpaths < <(sed -n 's|.*<IconPath>\(.*\)</IconPath>.*|\1|p' /etc/jwm/pivuan.jwmrc)
+	missing_icons=()
+	while IFS= read -r icon; do
+		if [[ "${icon}" == /* ]]; then
+			[[ -f "${icon}" ]] && continue
+		else
+			hit=""
+			for dir in "${iconpaths[@]}"; do
+				for ext in png svg xpm; do
+					[[ -f "${dir}/${icon}.${ext}" ]] && { hit=1; break 2; }
+				done
+			done
+			[[ -n "${hit}" ]] && continue
+		fi
+		missing_icons+=("${icon}")
+	done < <(grep -o 'icon="[^"]*"' /etc/jwm/pivuan.jwmrc | cut -d'"' -f2 | sort -u)
+	if ((${#missing_icons[@]})); then
+		error "menu icons not found in JWM's IconPaths: ${missing_icons[*]}"
+	fi
+	summary "- Menu icons: $(grep -o 'icon="[^"]*"' /etc/jwm/pivuan.jwmrc | sort -u | wc -l) names, missing: ${missing_icons[*]:-none}"
 	(cd "${home}" && HOME="${home}" jwm -p > /tmp/jwm-parse-user.log 2>&1) || true
 	if [[ -s /tmp/jwm-parse-user.log ]]; then cat /tmp/jwm-parse-user.log; error "jwm reports problems in ~/.jwmrc"; fi
 	# Realtime for JACK, and the user's groups.
