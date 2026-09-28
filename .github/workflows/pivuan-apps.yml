@@ -1,0 +1,158 @@
+# Build Pivuan's audio applications (.github/pivuan/apps/apps.conf) as arm64 .debs and,
+# with "publish", add them to the Pivuan apt repository (gh-pages of PIVUAN_REPO).
+#
+# Each app is built natively on GitHub's arm64 runner in a Debian trixie container: trixie
+# has the same libraries as Devuan excalibur, so the Depends that dpkg-shlibdeps writes
+# resolve on Pivuan. Every package is then installed in that container (its Depends must
+# resolve) and every program and plug-in it ships must find all its libraries.
+#
+# Secrets for publishing (the same as pivuan-build.yml): PIVUAN_APT_SIGNING_KEY, PIVUAN_REPO_TOKEN.
+
+name: Pivuan audio apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: "Apps to build, space-separated (empty: all in apps.conf)"
+        type: string
+        default: ""
+      publish:
+        description: "Publish the packages to the Pivuan apt repository"
+        type: boolean
+        default: false
+  push:
+    branches: [pivuan]
+    paths:
+      - ".github/pivuan/apps/**"
+      - ".github/workflows/pivuan-apps.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pivuan-apps-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PIVUAN_REPO: ${{ vars.PIVUAN_REPO || 'rations/pivuan' }}
+
+jobs:
+  list:
+    runs-on: ubuntu-24.04
+    outputs:
+      apps: ${{ steps.list.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        env:
+          WANTED: ${{ inputs.apps }}
+        run: |
+          set -euo pipefail
+          mapfile -t all < <(awk '!/^#/ && NF { print $1 }' .github/pivuan/apps/apps.conf)
+          if [[ -n "${WANTED// /}" ]]; then
+            apps=()
+            for a in ${WANTED}; do
+              printf '%s\n' "${all[@]}" | grep -qx -- "${a}" || { echo "::error::${a} is not in apps.conf"; exit 1; }
+              apps+=("${a}")
+            done
+          else
+            apps=("${all[@]}")
+          fi
+          echo "apps=$(printf '%s\n' "${apps[@]}" | jq -Rnc '[inputs]')" >> "${GITHUB_OUTPUT}"
+
+  build:
+    needs: list
+    name: ${{ matrix.app }}
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.list.outputs.apps) }}
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Build dependencies
+        run: |
+          set -eu
+          apt-get update -q
+          # The union of what the nine apps' own CI and READMEs install (Debian names).
+          apt-get install -y -q --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git ca-certificates file dpkg-dev lintian python3 \
+            libcairo2-dev libfreetype-dev libfontconfig-dev libx11-dev libxrandr-dev libjpeg-dev libpam0g-dev \
+            libasound2-dev libjack-jackd2-dev lv2-dev liblilv-dev libsuil-dev libsratom-dev \
+            libgtk-3-dev libgtk2.0-dev libgtkmm-3.0-dev libsndfile1-dev libsamplerate0-dev libpolkit-gobject-1-dev
+
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.app }}
+        run: bash .github/pivuan/apps/build-app.sh "${{ matrix.app }}" out
+
+      - name: Install it and check its libraries
+        run: |
+          set -euo pipefail
+          deb="$(ls out/*.deb)"
+          apt-get install -y -q --no-install-recommends "./${deb}"
+          fail=0
+          while IFS= read -r f; do
+            [[ -f "${f}" ]] && file -b "${f}" | grep -q '^ELF' || continue
+            if ldd "${f}" 2>&1 | grep -q 'not found'; then
+              echo "::error::${f}: $(ldd "${f}" | grep 'not found' | tr '\n' ' ')"
+              fail=1
+            fi
+          done < <(dpkg -L "$(dpkg-deb -f "${deb}" Package)")
+          echo "::group::lintian (report only)"
+          lintian --no-tag-display-limit "${deb}" || true
+          echo "::endgroup::"
+          {
+            echo "### $(dpkg-deb -f "${deb}" Package) $(dpkg-deb -f "${deb}" Version)"
+            echo ""
+            echo "Depends: \`$(dpkg-deb -f "${deb}" Depends)\`"
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit "${fail}"
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.app }}
+          path: out/*.deb
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: build
+    if: inputs.publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deb-*
+          path: debs
+          merge-multiple: true
+
+      - name: Publish to the Pivuan apt repository
+        env:
+          SIGNING_KEY: ${{ secrets.PIVUAN_APT_SIGNING_KEY }}
+          REPO_TOKEN: ${{ secrets.PIVUAN_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${SIGNING_KEY}" && -n "${REPO_TOKEN}" ]] || { echo "::error::publishing needs the PIVUAN_APT_SIGNING_KEY and PIVUAN_REPO_TOKEN secrets"; exit 1; }
+          command -v apt-ftparchive > /dev/null || sudo apt-get install -y -q apt-utils
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -m 700 "${GNUPGHOME}"
+          gpg --batch --quiet --import <<< "${SIGNING_KEY}"
+          PIVUAN_APT_SIGNING_KEY_ID="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
+          [[ -n "${PIVUAN_APT_SIGNING_KEY_ID}" ]] || { echo "::error::PIVUAN_APT_SIGNING_KEY holds no private key"; exit 1; }
+          export PIVUAN_APT_SIGNING_KEY_ID PIVUAN_APT_ACCEPT_ALL=1 PIVUAN_PAGES_LIST="${RUNNER_TEMP}/published.txt"
+          bash .github/pivuan/publish-pages.sh "apps-${GITHUB_RUN_NUMBER}" debs
+          {
+            echo "## Apt repository"
+            echo ""
+            echo '```'
+            cat "${PIVUAN_PAGES_LIST}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

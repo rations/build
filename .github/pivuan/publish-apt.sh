@@ -6,13 +6,16 @@
 #   site-dir  checkout of the Pages branch; updated in place (pool/, dists/, keys, index.html)
 #   revision  REVISION of this build: from the <deb-dir>s, packages whose version is <revision>
 #             or starts with "<revision>-" are published (Armbian's reversioned packages), plus
-#             every pivuan-config_*.deb (versioned by the configng commit)
+#             every pivuan-config_*.deb (versioned by the configng commit). With
+#             PIVUAN_APT_ACCEPT_ALL=1 every package found is published (the audio apps, whose
+#             versions are their own); revision is then only a label.
 #   deb-dir   directories searched recursively for .deb files
 # Environment:
 #   PIVUAN_APT_SIGNING_KEY_ID  key (fingerprint) in the current GNUPGHOME that signs the repository
 #   PIVUAN_APT_SUITE           default: excalibur
 #   PIVUAN_APT_ARCH            default: arm64
 #   PIVUAN_APT_KEEP            versions kept per package, default: 3
+#   PIVUAN_APT_ACCEPT_ALL      1: publish every package in the deb-dirs, whatever its version
 # Needs: dpkg-deb, dpkg, apt-ftparchive (apt-utils), gpg, gzip, xz.
 #
 set -euo pipefail
@@ -23,6 +26,7 @@ shift 2
 suite="${PIVUAN_APT_SUITE:-excalibur}"
 arch="${PIVUAN_APT_ARCH:-arm64}"
 keep="${PIVUAN_APT_KEEP:-3}"
+accept_all="${PIVUAN_APT_ACCEPT_ALL:-0}"
 key="${PIVUAN_APT_SIGNING_KEY_ID:?PIVUAN_APT_SIGNING_KEY_ID is not set}"
 # GitHub rejects files over 100 MB; stay under it.
 max_bytes=$((95 * 1024 * 1024))
@@ -35,7 +39,7 @@ while IFS= read -r -d '' deb; do
 	pkg="$(dpkg-deb -f "${deb}" Package)"
 	ver="$(dpkg-deb -f "${deb}" Version)"
 	deb_arch="$(dpkg-deb -f "${deb}" Architecture)"
-	if [[ "$(basename "${deb}")" != pivuan-config_*.deb && "${ver}" != "${revision}" && "${ver}" != "${revision}-"* ]]; then
+	if [[ "${accept_all}" != 1 && "$(basename "${deb}")" != pivuan-config_*.deb && "${ver}" != "${revision}" && "${ver}" != "${revision}-"* ]]; then
 		continue
 	fi
 	if [[ "${deb_arch}" != "${arch}" && "${deb_arch}" != all ]]; then
@@ -53,7 +57,7 @@ while IFS= read -r -d '' deb; do
 	added=$((added + 1))
 done < <(find "$@" -name '*.deb' -type f -print0 2> /dev/null)
 if ((added == 0)); then
-	echo "::error::no packages of revision ${revision} found in: $*" >&2
+	echo "::error::no packages to publish (revision ${revision}) found in: $*" >&2
 	exit 1
 fi
 
@@ -100,7 +104,7 @@ xz -9k "${dists}/main/binary-${arch}/Packages"
 		-o APT::FTPArchive::Release::Codename="${suite}" \
 		-o APT::FTPArchive::Release::Architectures="${arch}" \
 		-o APT::FTPArchive::Release::Components=main \
-		-o APT::FTPArchive::Release::Description="Pivuan: kernel, firmware, board support and pivuan-config for Devuan on the Raspberry Pi" \
+		-o APT::FTPArchive::Release::Description="Pivuan: kernel, firmware, board support, pivuan-config and audio applications for Devuan on the Raspberry Pi" \
 		release . > ../Release.tmp
 	mv ../Release.tmp Release
 	gpg --batch --yes --local-user "${key}" --clearsign --output InRelease Release
@@ -120,7 +124,7 @@ touch "${site}/.nojekyll"
 <style>body{font-family:sans-serif;max-width:48rem;margin:2rem auto;padding:0 1rem;line-height:1.5}pre{background:#f3f3f3;padding:.75rem;overflow-x:auto}</style>
 </head><body>
 <h1>Pivuan apt repository</h1>
-<p>Kernel, firmware, board support and pivuan-config updates for <a href="https://github.com/rations/pivuan">Pivuan</a> (Devuan ${suite} for the Raspberry Pi, ${arch}).
+<p>Kernel, firmware, board support, pivuan-config and audio application updates for <a href="https://github.com/rations/pivuan">Pivuan</a> (Devuan ${suite} for the Raspberry Pi, ${arch}).
 Pivuan images already use it; <code>apt update &amp;&amp; apt upgrade</code> installs the updates.</p>
 <p>Signing key fingerprint: <code>${fingerprint}</code></p>
 <pre>/etc/apt/sources.list.d/pivuan.sources

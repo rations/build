@@ -303,30 +303,15 @@ jobs:
           set -euo pipefail
           sudo chown -R "$(id -u):$(id -g)" output
           command -v apt-ftparchive > /dev/null || sudo apt-get install -y -q apt-utils
-          site="${RUNNER_TEMP}/pivuan-site"
-          remote="https://x-access-token:${REPO_TOKEN}@github.com/${PIVUAN_REPO}.git"
-          if git ls-remote --exit-code "${remote}" refs/heads/gh-pages > /dev/null; then
-            git clone --quiet --depth 1 --branch gh-pages "${remote}" "${site}"
-          else
-            mkdir -p "${site}"
-          fi
-          rm -rf "${site}/.git"
-          bash .github/pivuan/publish-apt.sh "${site}" "${REVISION}" output/debs output/pivuan-publish
-          # One commit, force-pushed: old package versions leave the branch instead of piling up in its history.
-          cd "${site}"
-          git init --quiet -b gh-pages
-          git add -A
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit --quiet -m "Pivuan apt repository ${REVISION} (${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
           # GitHub Pages serves the branch (rations/pivuan Settings -> Pages: Deploy from a branch, gh-pages, / (root)).
-          git push --quiet --force "${remote}" gh-pages
+          PIVUAN_PAGES_LIST="${RUNNER_TEMP}/published.txt" bash .github/pivuan/publish-pages.sh "${REVISION}" output/debs output/pivuan-publish
           {
             echo "## Apt repository"
             echo ""
             echo "Published to https://github.com/${PIVUAN_REPO}/tree/gh-pages (served at https://$(cut -d/ -f1 <<< "${PIVUAN_REPO}").github.io/$(cut -d/ -f2 <<< "${PIVUAN_REPO}")/):"
             echo ""
             echo '```'
-            awk '/^Package: /{p=$2} /^Version: /{print p " " $2}' dists/*/main/binary-*/Packages | sort
+            cat "${RUNNER_TEMP}/published.txt"
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
