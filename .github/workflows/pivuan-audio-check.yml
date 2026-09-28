@@ -105,14 +105,13 @@ jobs:
         run: |
           set -euo pipefail
           keys="${RUNNER_TEMP}/keys"
-          # The root's apt uses only the pinned Devuan keys, like the host did.
-          # shellcheck disable=SC2086 # word lists
+          # apt trusts only the pinned Devuan keys (signed-by), while bootstrapping and in the root.
           sudo mmdebstrap --variant=minbase --architectures=arm64 \
-            --keyring="${keys}/devuan-archive-keyring.gpg" \
             --include="$(tr -s ' ' ',' <<< "${BASE_PACKAGES}")" \
             --customize-hook="install -m 0644 '${keys}/devuan-archive-keyring.gpg' \"\$1/usr/share/keyrings/pivuan-check-devuan.gpg\"" \
             --customize-hook='echo "deb [signed-by=/usr/share/keyrings/pivuan-check-devuan.gpg] http://deb.devuan.org/merged excalibur main" > "$1/etc/apt/sources.list"' \
-            excalibur "${RUNNER_TEMP}/root.tar" http://deb.devuan.org/merged
+            excalibur "${RUNNER_TEMP}/root.tar" \
+            "deb [signed-by=${keys}/devuan-archive-keyring.gpg] http://deb.devuan.org/merged excalibur main"
           sudo docker import "${RUNNER_TEMP}/root.tar" pivuan-excalibur:check
           sudo rm -f "${RUNNER_TEMP}/root.tar"
 
