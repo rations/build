@@ -81,6 +81,16 @@ else
 	echo "::warning::DEVUAN_KEY_FINGERPRINTS is not set; using the downloaded Devuan keyring unpinned. See the run summary."
 fi
 
+# 4. The output keyring must itself verify both archives (it is what apt gets).
+for base in "${pool_base}" "${merged_base}"; do
+	curl -fsSL --retry 3 "${base}/dists/${release}/InRelease" -o InRelease
+	if ! gpgv --keyring "${out}" InRelease > /dev/null 2> gpgv.err; then
+		cat gpgv.err
+		echo "::error::${base}/dists/${release}/InRelease does not verify with the output keyring ${out}"
+		exit 1
+	fi
+done
+
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 	{
 		echo "## Devuan archive keyring"
