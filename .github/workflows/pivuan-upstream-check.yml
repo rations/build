@@ -1,0 +1,39 @@
+# What merging Armbian's build (upstream) into Pivuan's branch would bring: new commits, merge
+# conflicts, upstream changes to files Pivuan changed, and anything that brings systemd into the
+# parts Pivuan images use (.github/pivuan/upstream-check.sh). Changes nothing: it only reports.
+#
+# Weekly, and by hand. The run fails (and GitHub emails) when something needs attention before
+# merging; the report is on the run's page and in the "upstream-report" artifact.
+
+name: Pivuan upstream check
+
+on:
+  schedule:
+    - cron: "47 2 * * 1" # Mondays 02:47 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out Pivuan
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Compare with upstream
+        run: |
+          REPORT="${RUNNER_TEMP}/upstream-report.md" SUMMARY="${GITHUB_STEP_SUMMARY}" \
+            bash .github/pivuan/upstream-check.sh build
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: upstream-report
+          path: ${{ runner.temp }}/upstream-report.md
+          if-no-files-found: ignore
+          retention-days: 90
