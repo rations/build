@@ -88,7 +88,7 @@ set +e
 
 # 3. What must not be there.
 installed() { dpkg-query -W -f '${db:Status-Status}' "$1" 2> /dev/null | grep -qx installed; }
-for pkg in systemd systemd-sysv pipewire pipewire-bin pipewire-pulse wireplumber lightdm xserver-xorg-core audio-gui; do
+for pkg in systemd systemd-sysv pipewire pipewire-bin pipewire-pulse wireplumber lightdm xserver-xorg-core audio-gui pasystray; do
 	if installed "${pkg}"; then error "${pkg} is installed"; fi
 done
 if grep -rhs '^[^#]*\(xlibre-debian\|backports\)' /etc/apt/sources.list /etc/apt/sources.list.d/; then
@@ -96,7 +96,7 @@ if grep -rhs '^[^#]*\(xlibre-debian\|backports\)' /etc/apt/sources.list /etc/apt
 fi
 # What must be: PulseAudio for HDMI, Bluetooth and ordinary programs (and into JACK), the
 # compositor, the icon theme.
-for pkg in pulseaudio pulseaudio-utils pulseaudio-module-bluetooth pulseaudio-module-jack pavucontrol pasystray picom numix-icon-theme; do
+for pkg in pulseaudio pulseaudio-utils pulseaudio-module-bluetooth pulseaudio-module-jack pavucontrol picom numix-icon-theme; do
 	installed "${pkg}" || error "${pkg} is not installed"
 done
 
@@ -152,8 +152,10 @@ fi
 # 6. What pivuan-config set up for the desktop, and that removing it undoes the login change.
 if [[ "${mode}" == pivuan-config ]]; then
 	home=/home/pivuan
-	# Login: xlogin-launcher on tty1, text logins on tty2-6, the original kept.
-	grep -qx '1:2345:respawn:/usr/bin/xlogin-launcher' /etc/inittab || error "tty1 does not start xlogin-launcher"
+	# Login: xlogin-launcher on tty1 under its own id (so telinit q replaces the getty's
+	# running text login), text logins on tty2-6, the original kept.
+	grep -qx 'x1:2345:respawn:/usr/bin/xlogin-launcher' /etc/inittab || error "tty1 does not start xlogin-launcher (id x1)"
+	[[ -d /etc/inittab.d ]] || error "no /etc/inittab.d (init reports its absence on every reload)"
 	if grep -qE '^1:[0-9]*:respawn:.*getty' /etc/inittab; then error "tty1 still has an active getty"; fi
 	for vt in 2 3 4 5 6; do
 		grep -qE "^${vt}:[0-9]*:respawn:.*getty.*tty${vt}" /etc/inittab || error "tty${vt} lost its getty"
@@ -173,11 +175,18 @@ if [[ "${mode}" == pivuan-config ]]; then
 		error "${home}/.xinitrc does not start JWM"
 	fi
 	grep -q '/usr/lib/pivuan/audio-session' "${home}/.xinitrc" 2> /dev/null || error "${home}/.xinitrc does not run /usr/lib/pivuan/audio-session"
-	for f in /usr/lib/pivuan/audio-session /usr/lib/pivuan/pulse-session; do
-		[[ -x "${f}" ]] || error "no ${f}"
+	for f in /usr/lib/pivuan/audio-session /usr/lib/pivuan/pulse-session /usr/lib/pivuan/autostart; do
+		if [[ ! -x "${f}" ]]; then
+			error "no ${f}"
+		elif ! sh -n "${f}"; then
+			error "${f} is not valid sh"
+		fi
 	done
-	grep -q '/usr/lib/pivuan/pulse-session' /etc/jwm/pivuan.jwmrc || error "JWM does not start /usr/lib/pivuan/pulse-session"
-	grep -q '^[^#]*picom' /etc/jwm/pivuan.jwmrc || error "JWM does not start picom"
+	grep -q '<StartupCommand>/usr/lib/pivuan/pulse-session' /etc/jwm/pivuan.jwmrc || error "JWM does not start /usr/lib/pivuan/pulse-session"
+	grep -q '<StartupCommand>/usr/lib/pivuan/autostart' /etc/jwm/pivuan.jwmrc || error "JWM does not start /usr/lib/pivuan/autostart"
+	grep -q '<StartupCommand>picom .*--config /etc/pivuan/picom.conf' /etc/jwm/pivuan.jwmrc || error "JWM does not start picom with /etc/pivuan/picom.conf"
+	grep -qx 'shadow = false;' /etc/pivuan/picom.conf 2> /dev/null || error "no /etc/pivuan/picom.conf without shadows"
+	grep -q 'exec:pavucontrol' /etc/jwm/pivuan.jwmrc || error "the tray has no button for Volume Control"
 	grep -qx 'gtk-icon-theme-name=Numix' "${home}/.config/gtk-3.0/settings.ini" 2> /dev/null || error "GTK 3 does not use the Numix icons"
 	grep -q '^load-module module-udev-detect tsched=0' /etc/pulse/default.pa 2> /dev/null || error "PulseAudio's udev-detect lacks tsched=0 (HDMI)"
 	# The login-time script: the folders and pcmanfm bookmarks, for the user.
@@ -186,6 +195,27 @@ if [[ "${mode}" == pivuan-config ]]; then
 		[[ "$(stat -c %U "${home}/${d}" 2> /dev/null)" == pivuan ]] || error "${home}/${d} missing or not the user's"
 	done
 	[[ "$(grep -c '^file://' "${home}/.config/gtk-3.0/bookmarks" 2> /dev/null)" == 8 ]] || error "pcmanfm does not have the 8 bookmarks"
+	# The autostart runner: lxrandr's kind of entry (LXDE only) and plain ones run; hidden ones
+	# and those of other desktops do not.
+	autostart="${home}/.config/autostart"
+	su -s /bin/sh -c "mkdir -p '${autostart}'" pivuan
+	as_entry() { printf '[Desktop Entry]\nType=Application\nName=%s\nExec=touch /tmp/autostart-%s %%U\n%s\n' "$1" "$1" "$2" > "${autostart}/check-$1.desktop"; }
+	as_entry lxde 'OnlyShowIn=LXDE'
+	as_entry all ''
+	as_entry hidden 'Hidden=true'
+	as_entry xfce 'OnlyShowIn=XFCE;'
+	as_entry notlxde 'NotShowIn=LXDE;'
+	chown pivuan: "${autostart}"/check-*.desktop
+	rm -f /tmp/autostart-*
+	su -l -s /bin/sh -c /usr/lib/pivuan/autostart pivuan || error "/usr/lib/pivuan/autostart failed"
+	sleep 2
+	for e in lxde all; do
+		[[ -e "/tmp/autostart-${e}" ]] || error "/usr/lib/pivuan/autostart did not start the ${e} entry"
+	done
+	for e in hidden xfce notlxde; do
+		[[ ! -e "/tmp/autostart-${e}" ]] || error "/usr/lib/pivuan/autostart started the ${e} entry"
+	done
+	rm -f "${autostart}"/check-*.desktop /tmp/autostart-*
 	# Every menu icon is a file in one of JWM's IconPaths (JWM looks nowhere else).
 	mapfile -t iconpaths < <(sed -n 's|.*<IconPath>\(.*\)</IconPath>.*|\1|p' /etc/jwm/pivuan.jwmrc)
 	missing_icons=()
@@ -225,7 +255,7 @@ if [[ "${mode}" == pivuan-config ]]; then
 		summary "- brave-origin: **not installed**"
 	fi
 	pivuan-config --api module_desktops status de=audio || error "module_desktops status says audio is not installed"
-	summary "- /etc/inittab after the install: \`$(grep -E '^[1-6]:' /etc/inittab | tr '\n' ' ')\`"
+	summary "- /etc/inittab after the install: \`$(grep -E '^x?[1-6]:' /etc/inittab | tr '\n' ' ')\`"
 
 	# Remove it again.
 	rc=0

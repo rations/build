@@ -62,7 +62,7 @@ jobs:
         jwm lxterminal pcmanfm mousepad celluloid lxpolkit lxrandr lxappearance
         network-manager network-manager-gnome blueman bluez
         jackd2 alsa-utils pulseaudio pulseaudio-utils pulseaudio-module-bluetooth
-        pulseaudio-module-jack pavucontrol pasystray
+        pulseaudio-module-jack pavucontrol
         adwaita-icon-theme numix-icon-theme fonts-dejavu-core udisks2 gvfs-backends
     steps:
       - uses: actions/checkout@v4
