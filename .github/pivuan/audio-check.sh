@@ -40,7 +40,10 @@ origin() {
 		{ f = ($1 == v || ($1 == "***" && $2 == v)) }'
 }
 
-# 1. The Pivuan source, as the image has it (extensions/pivuan-apt.sh).
+# 1. apt as on the image: no recommended packages (the board support package's
+#    71-armbian-no-recommends; the build repository is mounted at /src), and the Pivuan
+#    source (extensions/pivuan-apt.sh).
+install -m 0644 /src/packages/bsp/common/etc/apt/apt.conf.d/71-armbian-no-recommends /etc/apt/apt.conf.d/
 install -m 0644 "${KEYS}/pivuan-archive-keyring.gpg" /usr/share/keyrings/pivuan-archive-keyring.gpg
 cat > /etc/apt/sources.list.d/pivuan.sources << EOF
 Types: deb
