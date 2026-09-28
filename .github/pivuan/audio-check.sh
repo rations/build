@@ -195,6 +195,9 @@ if [[ "${mode}" == pivuan-config ]]; then
 	# Realtime for JACK, and the user's groups.
 	grep -qE '^@audio +- +rtprio +[0-9]+' /etc/security/limits.d/audio.conf 2> /dev/null || error "no realtime limits for @audio"
 	id -nG pivuan | tr ' ' '\n' | grep -qx audio || error "the user is not in the audio group"
+	# nm-applet: the user may scan for and join Wi-Fi networks (polkit, group netdev).
+	id -nG pivuan | tr ' ' '\n' | grep -qx netdev || error "the user is not in the netdev group"
+	[[ -f /etc/polkit-1/rules.d/50-pivuan-networkmanager.rules ]] || error "no NetworkManager polkit rule for netdev"
 	# Browser (Brave's own repository; a failure there only skips the browser).
 	if dpkg-query -W -f '${db:Status-Status}' brave-origin 2> /dev/null | grep -qx installed; then
 		summary "- brave-origin $(dpkg-query -W -f '${Version}' brave-origin)"

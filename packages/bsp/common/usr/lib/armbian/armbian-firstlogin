@@ -406,11 +406,14 @@ set_timezone_and_locales() {
 							netplan apply --timeout 0 2>/dev/null
 						else
 							# ifupdown (sysvinit / Devuan images): wpa_supplicant is driven by the wpa-* options.
+							# "auto", not "allow-hotplug": at boot the networking init script brings up
+							# only auto interfaces, and the hotplug event for the Wi-Fi comes before
+							# ifupdown takes it, so an allow-hotplug Wi-Fi stays down after a reboot.
 							local _f="/etc/network/interfaces.d/${WIFI_DEVICE}"
 							ifdown "${WIFI_DEVICE}" > /dev/null 2>&1
 							if cat <<- EOF > "${_f}.tmp"
 							# Created by the first-login script
-							allow-hotplug ${WIFI_DEVICE}
+							auto ${WIFI_DEVICE}
 							iface ${WIFI_DEVICE} inet dhcp
 							wpa-ssid ${SSID}
 							wpa-psk ${password}

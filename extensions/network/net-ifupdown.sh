@@ -52,8 +52,9 @@ function pre_install_kernel_debs__configure_ifupdown() {
 		#   ifup wlan0
 		# For several networks use "wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf" instead of wpa-ssid/wpa-psk.
 		# If the radio is blocked, check "rfkill list" and set the country: "iw reg set XX".
+		# "auto" brings it up at boot; with "allow-hotplug" the Wi-Fi stays down after a reboot.
 		#
-		#allow-hotplug wlan0
+		#auto wlan0
 		#iface wlan0 inet dhcp
 		#	wpa-ssid YourNetworkName
 		#	wpa-psk YourPassphrase
