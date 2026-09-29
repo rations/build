@@ -59,7 +59,7 @@ jobs:
       AUDIO_PACKAGES: >-
         xserver-xlibre-core xserver-xlibre-input-libinput x11-xkb-utils
         keyboard-configuration xinit x11-xserver-utils dbus-x11 libgl1-mesa-dri picom
-        jwm lxterminal pcmanfm mousepad celluloid lxpolkit lxrandr lxappearance
+        jwm lxterminal pcmanfm mousepad celluloid lxpolkit lxrandr lxappearance python3-gi gir1.2-gtk-3.0
         network-manager network-manager-gnome blueman bluez
         jackd2 alsa-utils pulseaudio pulseaudio-utils pulseaudio-module-bluetooth
         pulseaudio-module-jack pavucontrol

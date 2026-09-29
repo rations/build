@@ -21,7 +21,9 @@
 # get installed, if PulseAudio (with its JACK and Bluetooth modules) or the compositor is
 # missing, if the X server isn't Pivuan's XLibre build (with modesetting, glamor and
 # libinput), if a menu icon is missing, or if any program or plug-in of the Pivuan apps misses
-# a library.
+# a library. MODE=pivuan-config also checks the desktop pivuan-config set up: the login
+# screen and its backgrounds, the session scripts, PulseAudio into JACK (with JACK's dummy
+# driver), Desktop Settings and the panel it makes.
 #
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -161,9 +163,17 @@ if [[ "${mode}" == pivuan-config ]]; then
 		grep -qE "^${vt}:[0-9]*:respawn:.*getty.*tty${vt}" /etc/inittab || error "tty${vt} lost its getty"
 	done
 	cmp -s /tmp/inittab.orig /etc/armbian/desktop/audio.inittab || error "the inittab backup is not the original"
-	grep -q "^XLOGIN_BACKGROUND='pivuan-background.png'" /etc/xlogin.conf 2> /dev/null || error "no /etc/xlogin.conf with the Pivuan background"
-	[[ "$(stat -c '%U %a' /usr/share/xlogin/backgrounds/pivuan-background.png 2> /dev/null)" == "root 644" ]] \
-		|| error "the login background is missing or not root-owned 0644"
+	# Backgrounds: the seven Pivuan backgrounds, dark gray by default, for the desktop and
+	# the login screen (xlogin reads only root-owned files nobody else can write).
+	grep -q "^XLOGIN_BACKGROUND='background-dark-gray.png'" /etc/xlogin.conf 2> /dev/null || error "no /etc/xlogin.conf with the dark gray background"
+	for colour in black blue dark-gray gray green orange yellow; do
+		[[ -f "/usr/share/backgrounds/pivuan/background-${colour}.png" ]] || error "no /usr/share/backgrounds/pivuan/background-${colour}.png"
+		[[ "$(stat -c '%U %a' "/usr/share/xlogin/backgrounds/background-${colour}.png" 2> /dev/null)" == "root 644" ]] \
+			|| error "the login background background-${colour}.png is missing or not root-owned 0644"
+	done
+	if grep -rqs 'pivuan-background' /etc/jwm /etc/xlogin.conf /usr/lib/pivuan "${home}/.jwmrc"; then
+		error "pivuan-background.png (the old name) is still referenced"
+	fi
 	compgen -G "/etc/rc2.d/S*seatd" > /dev/null || error "seatd is not enabled"
 	# Session.
 	jwm -p -f /etc/jwm/pivuan.jwmrc > /tmp/jwm-parse.log 2>&1 || true
@@ -175,7 +185,7 @@ if [[ "${mode}" == pivuan-config ]]; then
 		error "${home}/.xinitrc does not start JWM"
 	fi
 	grep -q '/usr/lib/pivuan/audio-session' "${home}/.xinitrc" 2> /dev/null || error "${home}/.xinitrc does not run /usr/lib/pivuan/audio-session"
-	for f in /usr/lib/pivuan/audio-session /usr/lib/pivuan/pulse-session /usr/lib/pivuan/autostart; do
+	for f in /usr/lib/pivuan/audio-session /usr/lib/pivuan/pulse-session /usr/lib/pivuan/autostart /usr/lib/pivuan/jwm-desktop; do
 		if [[ ! -x "${f}" ]]; then
 			error "no ${f}"
 		elif ! sh -n "${f}"; then
@@ -188,7 +198,40 @@ if [[ "${mode}" == pivuan-config ]]; then
 	grep -qx 'shadow = false;' /etc/pivuan/picom.conf 2> /dev/null || error "no /etc/pivuan/picom.conf without shadows"
 	grep -qx 'backend = "xrender";' /etc/pivuan/picom.conf 2> /dev/null || error "/etc/pivuan/picom.conf does not use the xrender backend"
 	grep -q '<ResizeMode>outline</ResizeMode>' /etc/jwm/pivuan.jwmrc || error "JWM does not resize with an outline"
-	grep -q 'exec:pavucontrol' /etc/jwm/pivuan.jwmrc || error "the tray has no button for Volume Control"
+	# The panel and background: /usr/lib/pivuan/jwm-desktop, from the user's Desktop Settings.
+	grep -q '<Include>exec:/usr/lib/pivuan/jwm-desktop</Include>' /etc/jwm/pivuan.jwmrc || error "JWM does not include /usr/lib/pivuan/jwm-desktop"
+	xml_ok() { python3 -c 'import sys, xml.dom.minidom; xml.dom.minidom.parse(sys.stdin)'; }
+	su -l -s /bin/sh -c /usr/lib/pivuan/jwm-desktop pivuan > /tmp/jwm-desktop.xml 2> /tmp/jwm-desktop.err || error "/usr/lib/pivuan/jwm-desktop failed: $(cat /tmp/jwm-desktop.err)"
+	xml_ok < /tmp/jwm-desktop.xml || error "/usr/lib/pivuan/jwm-desktop does not print valid XML (no settings)"
+	grep -q 'exec:pavucontrol' /tmp/jwm-desktop.xml || error "the tray has no button for Volume Control"
+	grep -q 'autohide="off"' /tmp/jwm-desktop.xml || error "the panel hides without settings"
+	grep -q '<Background type="scale">/usr/share/backgrounds/pivuan/background-dark-gray.png</Background>' /tmp/jwm-desktop.xml \
+		|| error "the default desktop background is not dark gray"
+	# With settings, as Desktop Settings writes them: another background, a hidden panel, a
+	# program icon (Volume Control's .desktop file), and one that is not installed (skipped).
+	su -s /bin/sh -c "mkdir -p ${home}/.config/pivuan && printf '%s\n' \
+		'background=/usr/share/backgrounds/pivuan/background-blue.png' autohide=yes \
+		launcher=pavucontrol.desktop launcher=not-installed.desktop > ${home}/.config/pivuan/desktop.conf" pivuan
+	su -l -s /bin/sh -c /usr/lib/pivuan/jwm-desktop pivuan > /tmp/jwm-desktop-set.xml
+	xml_ok < /tmp/jwm-desktop-set.xml || error "/usr/lib/pivuan/jwm-desktop does not print valid XML (with settings)"
+	grep -q 'autohide="bottom"' /tmp/jwm-desktop-set.xml || error "Desktop Settings: the panel does not hide"
+	grep -q 'background-blue.png</Background>' /tmp/jwm-desktop-set.xml || error "Desktop Settings: the background is not the one chosen"
+	grep -q '<TrayButton icon="[^"]*" popup="[^"]*">exec:pavucontrol</TrayButton>' /tmp/jwm-desktop-set.xml \
+		|| error "Desktop Settings: no panel icon for Volume Control"
+	(cd "${home}" && HOME="${home}" jwm -p > /tmp/jwm-parse-set.log 2>&1) || true
+	if [[ -s /tmp/jwm-parse-set.log ]]; then cat /tmp/jwm-parse-set.log; error "jwm reports problems with Desktop Settings applied"; fi
+	summary "- Desktop Settings panel: \`$(grep -o '<TrayButton [^>]*>exec:pavucontrol<' /tmp/jwm-desktop-set.xml)\`"
+	if [[ ! -x /usr/bin/pivuan-desktop-settings ]]; then
+		error "no /usr/bin/pivuan-desktop-settings"
+	elif ! su -l -s /bin/sh -c 'pivuan-desktop-settings --check' pivuan > /tmp/settings-check.log 2>&1; then
+		cat /tmp/settings-check.log
+		error "pivuan-desktop-settings does not start (Python or GTK missing)"
+	elif ! grep -qx 'launchers: pavucontrol.desktop not-installed.desktop' /tmp/settings-check.log; then
+		cat /tmp/settings-check.log
+		error "pivuan-desktop-settings does not read the settings"
+	fi
+	grep -q '>pivuan-desktop-settings</Program>' /etc/jwm/pivuan.jwmrc || error "the menu has no Desktop Settings"
+	rm -f "${home}/.config/pivuan/desktop.conf"
 	grep -qx 'gtk-icon-theme-name=Numix' "${home}/.config/gtk-3.0/settings.ini" 2> /dev/null || error "GTK 3 does not use the Numix icons"
 	grep -q '^load-module module-udev-detect tsched=0' /etc/pulse/default.pa 2> /dev/null || error "PulseAudio's udev-detect lacks tsched=0 (HDMI)"
 	# The login-time script: the folders and pcmanfm bookmarks, for the user.
@@ -218,6 +261,51 @@ if [[ "${mode}" == pivuan-config ]]; then
 		[[ ! -e "/tmp/autostart-${e}" ]] || error "/usr/lib/pivuan/autostart started the ${e} entry"
 	done
 	rm -f "${autostart}"/check-*.desktop /tmp/autostart-*
+	# PulseAudio into JACK: with PulseAudio running, start JACK (its dummy driver: no sound
+	# card here) and pulse-session must load the JACK sink ("JACK (audio interface)") and make
+	# it the default output; when JACK stops, the previous default comes back. PulseAudio runs
+	# with a null sink only (no sound card, no D-Bus session here).
+	cat > /tmp/jack-check.sh << 'EOF'
+export XDG_RUNTIME_DIR=/tmp/xdg-pivuan
+mkdir -p -m 0700 "${XDG_RUNTIME_DIR}"
+pulseaudio --daemonize=yes -n --exit-idle-time=-1 --log-target=file:/tmp/pulse.log \
+	-L module-native-protocol-unix -L 'module-null-sink sink_name=check_null' || exit 1
+sleep 1
+/usr/lib/pivuan/pulse-session > /tmp/pulse-session.log 2>&1 &
+session=$!
+sleep 3
+echo "before: $(pactl get-default-sink)"
+jackd --no-realtime -d dummy -r 48000 > /tmp/jackd.log 2>&1 &
+jack=$!
+for i in 1 2 3 4 5 6 7 8 9 10; do
+	sleep 1
+	pactl list short sinks | grep -q jack_out && break
+done
+sleep 1
+echo "with JACK: $(pactl get-default-sink)"
+pactl list sinks | sed -n 's/^\tDescription: /description: /p'
+kill "${jack}"
+for i in 1 2 3 4 5 6 7 8 9 10; do
+	sleep 1
+	pactl list short sinks | grep -q jack_out || break
+done
+sleep 3
+echo "after JACK: $(pactl get-default-sink)"
+kill "${session}"
+pulseaudio -k
+EOF
+	chmod 0755 /tmp/jack-check.sh
+	su -l -s /bin/sh -c /tmp/jack-check.sh pivuan > /tmp/jack-check.log 2>&1 || true
+	cat /tmp/jack-check.log
+	grep -qx 'with JACK: jack_out' /tmp/jack-check.log || error "PulseAudio does not play into JACK while JACK runs (no default jack_out)"
+	grep -qx 'description: JACK (audio interface)' /tmp/jack-check.log || error "the JACK sink is not named \"JACK (audio interface)\""
+	grep -qx 'after JACK: check_null' /tmp/jack-check.log || error "the default output does not come back when JACK stops"
+	if ! grep -qx 'with JACK: jack_out' /tmp/jack-check.log; then
+		echo "::group::PulseAudio, jackd and pulse-session logs"
+		tail -n 30 /tmp/pulse.log /tmp/jackd.log /tmp/pulse-session.log 2> /dev/null
+		echo "::endgroup::"
+	fi
+	summary "- PulseAudio into JACK: $(grep -E '^(before|with JACK|after JACK):' /tmp/jack-check.log | tr '\n' ' ')"
 	# Every menu icon is a file in one of JWM's IconPaths (JWM looks nowhere else).
 	mapfile -t iconpaths < <(sed -n 's|.*<IconPath>\(.*\)</IconPath>.*|\1|p' /etc/jwm/pivuan.jwmrc)
 	missing_icons=()
@@ -234,13 +322,13 @@ if [[ "${mode}" == pivuan-config ]]; then
 			[[ -n "${hit}" ]] && continue
 		fi
 		missing_icons+=("${icon}")
-	done < <(grep -o 'icon="[^"]*"' /etc/jwm/pivuan.jwmrc | cut -d'"' -f2 | sort -u)
+	done < <(cat /etc/jwm/pivuan.jwmrc /tmp/jwm-desktop.xml | grep -o 'icon="[^"]*"' | cut -d'"' -f2 | sort -u)
 	# Numix's icons are SVG: JWM draws them only when built with librsvg.
 	ldd /usr/bin/jwm 2> /dev/null | grep -q 'librsvg' || error "jwm is built without SVG support (librsvg): Numix's icons would not show"
 	if ((${#missing_icons[@]})); then
 		error "menu icons not found in JWM's IconPaths: ${missing_icons[*]}"
 	fi
-	summary "- Menu icons: $(grep -o 'icon="[^"]*"' /etc/jwm/pivuan.jwmrc | sort -u | wc -l) names, missing: ${missing_icons[*]:-none}"
+	summary "- Menu and panel icons: $(cat /etc/jwm/pivuan.jwmrc /tmp/jwm-desktop.xml | grep -o 'icon="[^"]*"' | sort -u | wc -l) names, missing: ${missing_icons[*]:-none}"
 	(cd "${home}" && HOME="${home}" jwm -p > /tmp/jwm-parse-user.log 2>&1) || true
 	if [[ -s /tmp/jwm-parse-user.log ]]; then cat /tmp/jwm-parse-user.log; error "jwm reports problems in ~/.jwmrc"; fi
 	# Realtime for JACK, and the user's groups.
