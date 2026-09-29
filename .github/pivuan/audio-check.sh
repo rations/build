@@ -205,6 +205,8 @@ if [[ "${mode}" == pivuan-config ]]; then
 	xml_ok < /tmp/jwm-desktop.xml || error "/usr/lib/pivuan/jwm-desktop does not print valid XML (no settings)"
 	grep -q 'exec:pavucontrol' /tmp/jwm-desktop.xml || error "the tray has no button for Volume Control"
 	grep -q 'autohide="off"' /tmp/jwm-desktop.xml || error "the panel hides without settings"
+	grep -q '<Tray x="0" y="-1" height="30" ' /tmp/jwm-desktop.xml || error "the panel is not 30 pixels high without settings"
+	grep -q '<Background>#2B2B2B</Background>' /tmp/jwm-desktop.xml || error "the panel is not Pivuan grey without settings"
 	grep -q '<Background type="scale">/usr/share/backgrounds/pivuan/background-dark-gray.png</Background>' /tmp/jwm-desktop.xml \
 		|| error "the default desktop background is not dark gray"
 	# With settings, as Desktop Settings writes them: another background, a hidden panel, a
@@ -214,11 +216,15 @@ if [[ "${mode}" == pivuan-config ]]; then
 	[[ -n "${volume_app}" ]] || error "pavucontrol has no .desktop file"
 	su -s /bin/sh -c "mkdir -p ${home}/.config/pivuan && printf '%s\n' \
 		'background=/usr/share/backgrounds/pivuan/background-blue.png' autohide=yes \
-		launcher=${volume_app} launcher=not-installed.desktop > ${home}/.config/pivuan/desktop.conf" pivuan
+		launcher=${volume_app} launcher=not-installed.desktop panel_size=40 icon_size=24 \
+		'panel_colour=#E8E4D8' > ${home}/.config/pivuan/desktop.conf" pivuan
 	su -l -s /bin/sh -c /usr/lib/pivuan/jwm-desktop pivuan > /tmp/jwm-desktop-set.xml
 	xml_ok < /tmp/jwm-desktop-set.xml || error "/usr/lib/pivuan/jwm-desktop does not print valid XML (with settings)"
 	grep -q 'autohide="bottom"' /tmp/jwm-desktop-set.xml || error "Desktop Settings: the panel does not hide"
 	grep -q 'background-blue.png</Background>' /tmp/jwm-desktop-set.xml || error "Desktop Settings: the background is not the one chosen"
+	grep -q '<Tray x="0" y="-1" height="40" ' /tmp/jwm-desktop-set.xml || error "Desktop Settings: the panel size is not the one chosen"
+	grep -q '<Background>#E8E4D8</Background>' /tmp/jwm-desktop-set.xml || error "Desktop Settings: the panel colour is not the one chosen"
+	grep -q '<Foreground>#1E1E1E</Foreground>' /tmp/jwm-desktop-set.xml || error "Desktop Settings: the text on a light panel is not dark"
 	grep -q '<TrayButton icon="[^"]*" popup="[^"]*">exec:pavucontrol</TrayButton>' /tmp/jwm-desktop-set.xml \
 		|| error "Desktop Settings: no panel icon for Volume Control (${volume_app})"
 	(cd "${home}" && HOME="${home}" jwm -p > /tmp/jwm-parse-set.log 2>&1) || true
@@ -229,12 +235,34 @@ if [[ "${mode}" == pivuan-config ]]; then
 	elif ! su -l -s /bin/sh -c 'pivuan-desktop-settings --check' pivuan > /tmp/settings-check.log 2>&1; then
 		cat /tmp/settings-check.log
 		error "pivuan-desktop-settings does not start (Python or GTK missing)"
-	elif ! grep -qx "launchers: ${volume_app} not-installed.desktop" /tmp/settings-check.log; then
+	elif ! grep -qx "launchers: ${volume_app} not-installed.desktop" /tmp/settings-check.log \
+		|| ! grep -qx 'panel size: 40' /tmp/settings-check.log || ! grep -qx 'icon size: 24' /tmp/settings-check.log; then
 		cat /tmp/settings-check.log
 		error "pivuan-desktop-settings does not read the settings"
 	fi
+	# The panel icons, made without a display: each exactly panel size - 8 (JWM's size for
+	# a panel icon), for Volume Control, the speaker and the program that is not installed
+	# (the generic icon); the panel uses them.
+	su -l -s /bin/sh -c 'pivuan-desktop-settings --render-icons' pivuan > /tmp/render-icons.log 2>&1 \
+		|| { cat /tmp/render-icons.log; error "pivuan-desktop-settings --render-icons failed"; }
+	cat /tmp/render-icons.log
+	for icon in audio-speakers "${volume_app%.desktop}" not-installed; do
+		grep -qx "${home}/.config/pivuan/panel-icons/${icon}.png 32x32" /tmp/render-icons.log \
+			|| error "Desktop Settings: no 32x32 panel icon for ${icon}"
+	done
+	su -l -s /bin/sh -c /usr/lib/pivuan/jwm-desktop pivuan > /tmp/jwm-desktop-icons.xml
+	grep -q "icon=\"${home}/.config/pivuan/panel-icons/${volume_app%.desktop}.png\"" /tmp/jwm-desktop-icons.xml \
+		|| error "the panel does not use the icons Desktop Settings made"
+	# Invalid values give the defaults.
+	su -s /bin/sh -c "printf '%s\n' panel_size=500 icon_size=x 'panel_colour=#GGGGGG' > ${home}/.config/pivuan/desktop.conf" pivuan
+	su -l -s /bin/sh -c /usr/lib/pivuan/jwm-desktop pivuan > /tmp/jwm-desktop-bad.xml
+	xml_ok < /tmp/jwm-desktop-bad.xml || error "/usr/lib/pivuan/jwm-desktop does not print valid XML (invalid settings)"
+	if ! grep -q '<Tray x="0" y="-1" height="30" ' /tmp/jwm-desktop-bad.xml \
+		|| ! grep -q '<Background>#2B2B2B</Background>' /tmp/jwm-desktop-bad.xml; then
+		error "invalid panel settings do not give the defaults"
+	fi
 	grep -q '>pivuan-desktop-settings</Program>' /etc/jwm/pivuan.jwmrc || error "the menu has no Desktop Settings"
-	rm -f "${home}/.config/pivuan/desktop.conf"
+	rm -rf "${home}/.config/pivuan/desktop.conf" "${home}/.config/pivuan/panel-icons"
 	grep -qx 'gtk-icon-theme-name=Numix' "${home}/.config/gtk-3.0/settings.ini" 2> /dev/null || error "GTK 3 does not use the Numix icons"
 	grep -q '^load-module module-udev-detect tsched=0' /etc/pulse/default.pa 2> /dev/null || error "PulseAudio's udev-detect lacks tsched=0 (HDMI)"
 	# The login-time script: the folders and pcmanfm bookmarks, for the user.
