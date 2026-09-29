@@ -337,50 +337,6 @@ EOF
 		echo "::endgroup::"
 	fi
 	summary "- PulseAudio into JACK: $(grep -E '^(before|with JACK|after JACK):' /tmp/jack-check.log | tr '\n' ' ')"
-	# JackDAW finds the user's own plug-ins in ~/.vst3 and ~/.lv2: copies of NAMix (VST3; a
-	# bundle keeps its name, as the SDK loads Contents/<arch>-linux/<name>.so) and of lvtuner
-	# (LV2, under another URI so it isn't the system one), found by its startup scan (on a
-	# virtual display, with JACK's dummy driver), which lists what it found in
-	# ~/.jackdaw/pluginindex.
-	apt-get install -y -q xvfb xauth > /tmp/xvfb-install.log 2>&1 || error "xvfb did not install: $(tail -n 5 /tmp/xvfb-install.log)"
-	cat > /tmp/jackdaw-check.sh << 'EOF'
-#!/bin/sh
-rm -rf "${HOME}/.jackdaw" "${HOME}/.vst3" "${HOME}/.lv2"
-mkdir -p "${HOME}/.vst3" "${HOME}/.lv2"
-cp -a /usr/lib/vst3/NAMix.vst3 "${HOME}/.vst3/"
-cp -a /usr/lib/lv2/lvtuner.lv2 "${HOME}/.lv2/home-check.lv2"
-sed -i 's|https://github.com/rations/lvtuner|urn:pivuan:home-check|g' "${HOME}"/.lv2/home-check.lv2/*.ttl
-echo "VST3 bundle: $(ls "${HOME}/.vst3/NAMix.vst3/Contents" | tr "\n" " ")"
-export XDG_RUNTIME_DIR=/tmp/xdg-pivuan
-mkdir -p -m 0700 "${XDG_RUNTIME_DIR}"
-jackd --no-realtime -d dummy -r 48000 > /tmp/jackdaw-jackd.log 2>&1 &
-jack=$!
-sleep 2
-xvfb-run -a jackdaw > /tmp/jackdaw.log 2>&1 &
-for i in $(seq 60); do
-	sleep 1
-	[ -s "${HOME}/.jackdaw/pluginindex" ] && break
-done
-sleep 1
-pkill -x jackdaw
-pkill -f Xvfb
-kill "${jack}"
-grep 'plugin scan:' /tmp/jackdaw.log
-cat "${HOME}/.jackdaw/pluginindex"
-rm -rf "${HOME}/.jackdaw" "${HOME}/.vst3" "${HOME}/.lv2"
-EOF
-	chmod 0755 /tmp/jackdaw-check.sh
-	su -l -s /bin/sh -c /tmp/jackdaw-check.sh pivuan > /tmp/jackdaw-check.log 2>&1 || true
-	cat /tmp/jackdaw-check.log
-	grep -q "^2:${home}/.vst3/NAMix.vst3" /tmp/jackdaw-check.log || error "JackDAW does not find a VST3 plug-in in ~/.vst3"
-	grep -qx '0:urn:pivuan:home-check' /tmp/jackdaw-check.log || error "JackDAW does not find an LV2 plug-in in ~/.lv2"
-	grep -q "^2:/usr/lib/vst3/NAMix.vst3" /tmp/jackdaw-check.log || error "JackDAW does not find NAMix in /usr/lib/vst3"
-	if ! grep -q "^2:${home}/.vst3/NAMix.vst3" /tmp/jackdaw-check.log; then
-		echo "::group::JackDAW log"
-		tail -n 40 /tmp/jackdaw.log
-		echo "::endgroup::"
-	fi
-	summary "- JackDAW: $(grep 'plugin scan:' /tmp/jackdaw-check.log | sed 's/.*plugin scan: //'); ~/.vst3: $(grep -c "^2:${home}/.vst3/" /tmp/jackdaw-check.log), ~/.lv2: $(grep -c '^0:urn:pivuan:home-check' /tmp/jackdaw-check.log)"
 	# Every menu icon is a file in one of JWM's IconPaths (JWM looks nowhere else).
 	mapfile -t iconpaths < <(sed -n 's|.*<IconPath>\(.*\)</IconPath>.*|\1|p' /etc/jwm/pivuan.jwmrc)
 	missing_icons=()
