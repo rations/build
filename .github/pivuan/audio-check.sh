@@ -208,25 +208,28 @@ if [[ "${mode}" == pivuan-config ]]; then
 	grep -q '<Background type="scale">/usr/share/backgrounds/pivuan/background-dark-gray.png</Background>' /tmp/jwm-desktop.xml \
 		|| error "the default desktop background is not dark gray"
 	# With settings, as Desktop Settings writes them: another background, a hidden panel, a
-	# program icon (Volume Control's .desktop file), and one that is not installed (skipped).
+	# program icon (Volume Control's .desktop file, org.pulseaudio.pavucontrol.desktop in
+	# pavucontrol 6), and one that is not installed (skipped).
+	volume_app="$(dpkg -L pavucontrol | sed -n 's|^/usr/share/applications/\([^/]*\.desktop\)$|\1|p' | head -n 1)"
+	[[ -n "${volume_app}" ]] || error "pavucontrol has no .desktop file"
 	su -s /bin/sh -c "mkdir -p ${home}/.config/pivuan && printf '%s\n' \
 		'background=/usr/share/backgrounds/pivuan/background-blue.png' autohide=yes \
-		launcher=pavucontrol.desktop launcher=not-installed.desktop > ${home}/.config/pivuan/desktop.conf" pivuan
+		launcher=${volume_app} launcher=not-installed.desktop > ${home}/.config/pivuan/desktop.conf" pivuan
 	su -l -s /bin/sh -c /usr/lib/pivuan/jwm-desktop pivuan > /tmp/jwm-desktop-set.xml
 	xml_ok < /tmp/jwm-desktop-set.xml || error "/usr/lib/pivuan/jwm-desktop does not print valid XML (with settings)"
 	grep -q 'autohide="bottom"' /tmp/jwm-desktop-set.xml || error "Desktop Settings: the panel does not hide"
 	grep -q 'background-blue.png</Background>' /tmp/jwm-desktop-set.xml || error "Desktop Settings: the background is not the one chosen"
 	grep -q '<TrayButton icon="[^"]*" popup="[^"]*">exec:pavucontrol</TrayButton>' /tmp/jwm-desktop-set.xml \
-		|| error "Desktop Settings: no panel icon for Volume Control"
+		|| error "Desktop Settings: no panel icon for Volume Control (${volume_app})"
 	(cd "${home}" && HOME="${home}" jwm -p > /tmp/jwm-parse-set.log 2>&1) || true
 	if [[ -s /tmp/jwm-parse-set.log ]]; then cat /tmp/jwm-parse-set.log; error "jwm reports problems with Desktop Settings applied"; fi
-	summary "- Desktop Settings panel: \`$(grep -o '<TrayButton [^>]*>exec:pavucontrol<' /tmp/jwm-desktop-set.xml)\`"
+	summary "- Desktop Settings panel (${volume_app}): \`$(grep -o '<TrayButton [^>]*>exec:pavucontrol<' /tmp/jwm-desktop-set.xml)\`"
 	if [[ ! -x /usr/bin/pivuan-desktop-settings ]]; then
 		error "no /usr/bin/pivuan-desktop-settings"
 	elif ! su -l -s /bin/sh -c 'pivuan-desktop-settings --check' pivuan > /tmp/settings-check.log 2>&1; then
 		cat /tmp/settings-check.log
 		error "pivuan-desktop-settings does not start (Python or GTK missing)"
-	elif ! grep -qx 'launchers: pavucontrol.desktop not-installed.desktop' /tmp/settings-check.log; then
+	elif ! grep -qx "launchers: ${volume_app} not-installed.desktop" /tmp/settings-check.log; then
 		cat /tmp/settings-check.log
 		error "pivuan-desktop-settings does not read the settings"
 	fi
