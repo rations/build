@@ -80,6 +80,7 @@ function artifact_armbian-bsp-cli_prepare_version() {
 	declare -a dirs_to_hash=(
 		"${SRC}/packages/bsp/common"   # common stuff
 		"${SRC}/packages/bsp/sysvinit" # sysvinit (Devuan) init scripts; only copied when INIT_SYSTEM=sysvinit
+		"${SRC}/packages/bsp/pivuan"   # Pivuan branding (fastfetch logo); only copied when INIT_SYSTEM=sysvinit
 		"${SRC}/packages/bsp/${BOARD}" # board-specific stuff
 		"${SRC}/config/optional/_any_board/_packages/bsp-cli"
 		"${SRC}/config/optional/architectures/${ARCH}/_packages/bsp-cli"

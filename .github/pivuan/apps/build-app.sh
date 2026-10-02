@@ -202,7 +202,8 @@ case "${pkg}" in
 		! grep -q '/usr/local/bin/xlogin' "${stage}/usr/bin/xlogin-launcher" || die "xlogin-launcher still starts /usr/local/bin/xlogin"
 		# Pivuan starts it from /etc/inittab (pivuan-config) and has its own polkit power rule.
 		rm -rf "${stage}/etc/init.d" "${stage}/etc/polkit-1"
-		conffiles="/etc/pam.d/xlogin"
+		conffiles="/etc/pam.d/xlogin
+/etc/pam.d/xlogin-autologin"
 		;;
 	*)
 		die "no recipe"

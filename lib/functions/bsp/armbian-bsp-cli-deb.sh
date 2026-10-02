@@ -131,6 +131,11 @@ function compile_armbian-bsp-cli() {
 	if [[ "${INIT_SYSTEM}" == "sysvinit" ]]; then
 		display_alert "Copying sysvinit bsp files" "packages/bsp/sysvinit" "info"
 		run_host_command_logged rsync -av "${SRC}"/packages/bsp/sysvinit/* "${destination}"
+		# Pivuan branding: the Pivuan logo in fastfetch, and the Pivuan name in /etc/os-release.
+		display_alert "Copying Pivuan bsp files" "packages/bsp/pivuan" "info"
+		run_host_command_logged rsync -av "${SRC}"/packages/bsp/pivuan/* "${destination}"
+		postinst_functions+=(board_side_bsp_cli_postinst_pivuan_os_release)
+		postrm_functions+=(board_side_bsp_cli_postrm_pivuan_os_release)
 	fi
 
 	# Optional: park SATA/HDD heads on shutdown. Opt-in per board or family with
@@ -242,11 +247,11 @@ function compile_armbian-bsp-cli() {
 
 	### postrm
 	artifact_package_hook_helper_board_side_functions "postrm" board_side_bsp_cli_postrm "${postrm_functions[@]}"
-	unset board_side_bsp_cli_postrm
+	unset board_side_bsp_cli_postrm board_side_bsp_cli_postrm_pivuan_os_release
 
 	### postinst -- a bit more complex, extendable via postinst_functions which can be customized in hook above
 	artifact_package_hook_helper_board_side_functions "postinst" board_side_bsp_cli_postinst_base "${postinst_functions[@]}" board_side_bsp_cli_postinst_finish
-	unset board_side_bsp_cli_postinst_base board_side_bsp_cli_postinst_update_uboot_bootscript board_side_bsp_cli_postinst_finish
+	unset board_side_bsp_cli_postinst_base board_side_bsp_cli_postinst_update_uboot_bootscript board_side_bsp_cli_postinst_pivuan_os_release board_side_bsp_cli_postinst_finish
 
 	# add some summary to the image # @TODO: another?
 	fingerprint_image "${destination}/etc/armbian.txt"
@@ -477,6 +482,34 @@ function board_side_bsp_cli_postinst_base() {
 		if ! grep --quiet "RESUME=none" /etc/initramfs-tools/initramfs.conf; then
 			echo "RESUME=none" >> /etc/initramfs-tools/initramfs.conf
 		fi
+	fi
+}
+
+# Pivuan (Devuan): /etc/os-release names the system Pivuan (what fastfetch, neofetch and lsb_release -d show).
+# Devuan's base-files owns /usr/lib/os-release (/etc/os-release links to it), so it is diverted to
+# os-release.devuan, where base-files upgrades then write it, and the Pivuan copy is made from it here.
+# ID stays devuan, so scripts and lsb_release -i still see Devuan. Vendor values come from /etc/armbian-release.
+function board_side_bsp_cli_postinst_pivuan_os_release() {
+	if [[ -z "$(dpkg-divert --listpackage /usr/lib/os-release)" ]]; then
+		dpkg-divert --package "${DPKG_MAINTSCRIPT_PACKAGE}" --add --rename --divert /usr/lib/os-release.devuan /usr/lib/os-release
+	fi
+	if [[ -f /usr/lib/os-release.devuan ]]; then
+		sed -e "s|^NAME=.*|NAME=\"${VENDOR:-Pivuan}\"|" \
+			-e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"${VENDOR:-Pivuan}\"|" \
+			-e "s|^HOME_URL=.*|HOME_URL=\"${VENDORURL}\"|" \
+			-e "s|^SUPPORT_URL=.*|SUPPORT_URL=\"${VENDORSUPPORT}\"|" \
+			-e "s|^BUG_REPORT_URL=.*|BUG_REPORT_URL=\"${VENDORBUGS}\"|" \
+			/usr/lib/os-release.devuan > /usr/lib/os-release.pivuan-new &&
+			chmod 0644 /usr/lib/os-release.pivuan-new &&
+			mv -f /usr/lib/os-release.pivuan-new /usr/lib/os-release
+	fi
+}
+
+# Pivuan (Devuan): when the BSP is removed, give /usr/lib/os-release back to base-files.
+function board_side_bsp_cli_postrm_pivuan_os_release() {
+	if [[ remove == "$1" || abort-install == "$1" ]] && [[ "$(dpkg-divert --listpackage /usr/lib/os-release)" == "${DPKG_MAINTSCRIPT_PACKAGE}" ]]; then
+		rm -f /usr/lib/os-release
+		dpkg-divert --package "${DPKG_MAINTSCRIPT_PACKAGE}" --remove --rename --divert /usr/lib/os-release.devuan /usr/lib/os-release
 	fi
 }
 
