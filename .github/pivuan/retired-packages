@@ -1,0 +1,11 @@
+# Packages taken out of the Pivuan apt repository. publish-apt.sh deletes every version of
+# these from the pool each time it publishes (the image build, the audio apps, XLibre and
+# vstbridge all publish with it). Systems that have one installed keep it; apt just stops
+# offering updates for it. One package name per line.
+
+# Replaced by PulseAudio (pavucontrol) in Pivuan Audio.
+audio-gui
+
+# XLibre's setuid wrapper for startx, not needed: X gets its devices from seatd (Pivuan
+# Audio) or runs as root (LightDM). No longer published by rations/pivuan xlibre/.
+xserver-xlibre-legacy

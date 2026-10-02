@@ -120,9 +120,8 @@ jobs:
           EXTRA: ${{ inputs.extra_packages }}
         run: |
           set -euo pipefail
-          # The Pivuan apps the desktop installs: all of apps.conf except Audio-Gui (still
-          # packaged, but PulseAudio replaced it in the desktop).
-          apps="$(awk '!/^#/ && NF && $1 != "audio-gui" { print $1 }' .github/pivuan/apps/apps.conf | tr '\n' ' ')"
+          # The Pivuan apps the desktop installs: all of apps.conf.
+          apps="$(awk '!/^#/ && NF { print $1 }' .github/pivuan/apps/apps.conf | tr '\n' ' ')"
           touch "${RUNNER_TEMP}/summary.md"
           mkdir -p "${RUNNER_TEMP}/deb"
           deb="$(cd "${RUNNER_TEMP}/deb" && ls pivuan-config_*.deb 2> /dev/null || true)"

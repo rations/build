@@ -94,14 +94,6 @@ from_tarball() { # <glob in dist/>
 }
 
 case "${pkg}" in
-	audio-gui)
-		summary="ALSA mixer and audio routing without PulseAudio or PipeWire"
-		description="A mixer for ALSA devices and a switch between three routings for programs
- that play through PulseAudio: its own small PulseAudio-protocol bridge to ALSA,
- plain ALSA, or a bridge into JACK. No PulseAudio or PipeWire server is used."
-		recommends="alsa-utils"
-		from_project_deb packaging/build-deb.sh "${upstream}"
-		;;
 	jack-graph)
 		summary="Connection manager for JACK and ALSA MIDI"
 		description="Shows JACK audio and MIDI ports and ALSA sequencer clients as a graph and

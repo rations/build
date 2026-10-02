@@ -61,7 +61,16 @@ if ((added == 0)); then
 	exit 1
 fi
 
-# 2. Keep the newest ${keep} versions of each package.
+# 2. Packages taken out of the repository (retired-packages, next to this script): all versions go.
+while read -r pkg; do
+	[[ -n "${pkg}" && "${pkg}" != \#* ]] || continue
+	dir="${site}/pool/main/${pkg:0:1}/${pkg}"
+	[[ -d "${dir}" ]] || continue
+	echo "remove retired ${pkg}"
+	rm -rf "${dir}"
+done < "$(dirname "${BASH_SOURCE[0]}")/retired-packages"
+
+# 3. Keep the newest ${keep} versions of each package.
 for dir in "${site}"/pool/main/*/*/; do
 	mapfile -t debs < <(find "${dir}" -maxdepth 1 -name '*.deb' -type f)
 	((${#debs[@]} > keep)) || continue
@@ -85,7 +94,7 @@ for dir in "${site}"/pool/main/*/*/; do
 	unset ordered versions
 done
 
-# 3. Indexes and the signed Release.
+# 4. Indexes and the signed Release.
 dists="${site}/dists/${suite}"
 rm -rf "${dists}"
 mkdir -p "${dists}/main/binary-${arch}"
@@ -111,7 +120,7 @@ xz -9k "${dists}/main/binary-${arch}/Packages"
 	gpg --batch --yes --local-user "${key}" --armor --detach-sign --output Release.gpg Release
 )
 
-# 4. Public key, and a page for people who open the address in a browser.
+# 5. Public key, and a page for people who open the address in a browser.
 gpg --batch --armor --export "${key}" > "${site}/pivuan-archive-keyring.asc"
 gpg --batch --export "${key}" > "${site}/pivuan-archive-keyring.gpg"
 fingerprint="$(gpg --batch --with-colons --fingerprint "${key}" | awk -F: '$1 == "fpr" { print $10; exit }')"
