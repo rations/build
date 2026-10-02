@@ -39,9 +39,10 @@ lines=()
 safe_source /etc/armbian-release
 if [[ -n "${VENDOR:-}" && "${VENDOR}" != Armbian* ]]; then
   if command -v pivuan-config >/dev/null 2>&1 && ! compgen -G '/etc/armbian/desktop/*.tier' >/dev/null; then
+    # Pivuan Audio first: it is what Pivuan is made for.
+    lines+=("To install Pivuan Audio run pivuan-config --cmd AUDI01")
     lines+=("To install XFCE desktop run pivuan-config --cmd XFCE01")
     lines+=("To install MATE desktop run pivuan-config --cmd MATE01")
-    lines+=("To install Pivuan Audio run pivuan-config --cmd AUDI01")
   fi
 else
   # 1) Optional quote: /etc/update-motd.d/quotes.txt lines like: YYYY-MM-DD|Some text...
