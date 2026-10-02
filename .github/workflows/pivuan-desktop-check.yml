@@ -4,8 +4,10 @@
 # desktop package list the way pivuan-config does for excalibur/arm64, then
 #   1. simulates the install (apt-get -s, no recommends, as on the image) on top
 #      of the Pivuan base stack (sysvinit, elogind, eudev, ifupdown), and fails if
-#      systemd or systemd-sysv would be installed or apt cannot resolve it;
-#   2. checks every package also exists for arm64 in the Devuan archive;
+#      systemd or systemd-sysv would be installed or apt cannot resolve it (XLibre,
+#      arm64 only, is left out; a desktop on XLibre fails if Xorg's server would come in);
+#   2. checks every package also exists for arm64 in the Devuan archive (XLibre: in the
+#      Pivuan apt repository);
 #   3. does the same for the pivuan-config package's own dependencies;
 #   4. adds Brave's apt repository the way pivuan-config does and checks the
 #      browser (DESKTOP_BRAVE_PKG, e.g. brave-origin) the same way.
@@ -68,6 +70,11 @@ jobs:
           . ./parsed.sh
           echo "Packages: ${DESKTOP_PACKAGES} ${DESKTOP_DM}"
           echo "${DESKTOP_PACKAGES} ${DESKTOP_DM}" | tr ' ' '\n' | grep -v '^$' | sort -u > packages.txt
+          # XLibre comes from the Pivuan apt repository, for arm64 only: looked up there
+          # (arm64 step) instead of in the amd64 simulation.
+          grep -E '^xserver-xlibre-' packages.txt > pivuan.txt || true
+          sed -i -E '/^xserver-xlibre-/d' packages.txt
+          echo "From the Pivuan apt repository: $(tr '\n' ' ' < pivuan.txt)"
           # Browser from Brave's apt repository (module_desktops _module_desktops_install_brave)
           echo "${DESKTOP_BRAVE_PKG:-}" | grep -v '^$' > brave.txt || true
           echo "Brave package: $(cat brave.txt)"
@@ -106,6 +113,11 @@ jobs:
               grep -E '^Inst systemd(-sysv)? ' "sim-$list"
               fail=1
             fi
+            # A desktop on XLibre must not also bring Xorg's own server.
+            if [ -s pivuan.txt ] && grep -xE 'xserver-xorg|xserver-xorg-core' "inst-$list"; then
+              echo "::error::installing $list would pull in Xorg's server; the desktop uses XLibre"
+              fail=1
+            fi
           done
           {
             echo "## ${{ inputs.desktop }} (${{ inputs.tier }}) on Devuan excalibur"
@@ -129,6 +141,13 @@ jobs:
             # Architecture: all packages are listed under the native arch as well
             apt-cache show "$p:arm64" > /dev/null 2>&1 || apt-cache show "$p" 2>/dev/null | grep -q '^Architecture: all' || missing="$missing $p"
           done
+          # XLibre: in the Pivuan apt repository's arm64 index
+          if [ -s pivuan.txt ]; then
+            curl -fsSL https://rations.github.io/pivuan/dists/excalibur/main/binary-arm64/Packages > pivuan-Packages
+            while read -r p; do
+              grep -qx "Package: $p" pivuan-Packages || missing="$missing $p"
+            done < pivuan.txt
+          fi
           if [[ -n "$missing" ]]; then
             echo "::error::not available for arm64:$missing"
             echo "- Missing on arm64:$missing" >> "$GITHUB_STEP_SUMMARY"
