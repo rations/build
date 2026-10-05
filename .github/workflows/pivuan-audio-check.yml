@@ -5,7 +5,7 @@
 # checked with the pinned Devuan keys (.github/pivuan/devuan-keyring.sh), natively on GitHub's
 # arm64 runner. Docker then runs .github/pivuan/audio-check.sh in it, which installs Pivuan
 # Audio for real and checks it: no systemd, PipeWire, LightDM, Audio-Gui or Xorg server;
-# PulseAudio with its JACK and Bluetooth modules, picom and the Numix icons; Pivuan's XLibre
+# PulseAudio with its JACK and Bluetooth modules, picom and the Pivuan and Numix icons; Pivuan's XLibre
 # build with modesetting, glamor and libinput; every menu icon found; every program and
 # plug-in of the Pivuan apps finds its libraries.
 #
@@ -63,7 +63,7 @@ jobs:
         network-manager network-manager-gnome blueman bluez
         jackd2 alsa-utils pulseaudio pulseaudio-utils pulseaudio-module-bluetooth
         pulseaudio-module-jack pavucontrol
-        adwaita-icon-theme numix-icon-theme fonts-dejavu-core udisks2 gvfs-backends
+        adwaita-icon-theme pivuan-icon-theme numix-icon-theme fonts-dejavu-core udisks2 gvfs-backends
     steps:
       - uses: actions/checkout@v4
 

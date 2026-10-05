@@ -97,8 +97,8 @@ if grep -rhs '^[^#]*\(xlibre-debian\|backports\)' /etc/apt/sources.list /etc/apt
 	error "an xlibre-debian or backports source is configured"
 fi
 # What must be: PulseAudio for HDMI, Bluetooth and ordinary programs (and into JACK), the
-# compositor, the icon theme.
-for pkg in pulseaudio pulseaudio-utils pulseaudio-module-bluetooth pulseaudio-module-jack pavucontrol picom numix-icon-theme; do
+# compositor, the icon themes (Pivuan's, and Numix for the icons it lacks).
+for pkg in pulseaudio pulseaudio-utils pulseaudio-module-bluetooth pulseaudio-module-jack pavucontrol picom pivuan-icon-theme numix-icon-theme; do
 	installed "${pkg}" || error "${pkg} is not installed"
 done
 
@@ -263,7 +263,9 @@ if [[ "${mode}" == pivuan-config ]]; then
 	fi
 	grep -q '>pivuan-desktop-settings</Program>' /etc/jwm/pivuan.jwmrc || error "the menu has no Desktop Settings"
 	rm -rf "${home}/.config/pivuan/desktop.conf" "${home}/.config/pivuan/panel-icons"
-	grep -qx 'gtk-icon-theme-name=Numix' "${home}/.config/gtk-3.0/settings.ini" 2> /dev/null || error "GTK 3 does not use the Numix icons"
+	# GTK uses the Pivuan icons (pivuan-icon-theme), which inherit Numix's for the ones they lack.
+	grep -qx 'gtk-icon-theme-name=Pivuan' "${home}/.config/gtk-3.0/settings.ini" 2> /dev/null || error "GTK 3 does not use the Pivuan icons"
+	grep -q '^Inherits=.*Numix' /usr/share/icons/Pivuan/index.theme 2> /dev/null || error "the Pivuan icon theme does not inherit Numix"
 	grep -q '^load-module module-udev-detect tsched=0' /etc/pulse/default.pa 2> /dev/null || error "PulseAudio's udev-detect lacks tsched=0 (HDMI)"
 	# The login-time script: the folders and pcmanfm bookmarks, for the user.
 	su -l -s /bin/sh -c /usr/lib/pivuan/audio-session pivuan || error "/usr/lib/pivuan/audio-session failed"
