@@ -163,9 +163,9 @@ if [[ "${mode}" == pivuan-config ]]; then
 		grep -qE "^${vt}:[0-9]*:respawn:.*getty.*tty${vt}" /etc/inittab || error "tty${vt} lost its getty"
 	done
 	cmp -s /tmp/inittab.orig /etc/armbian/desktop/audio.inittab || error "the inittab backup is not the original"
-	# Backgrounds: the seven Pivuan backgrounds, dark gray by default, for the desktop and
+	# Backgrounds: the seven Pivuan backgrounds, black by default, for the desktop and
 	# the login screen (xlogin reads only root-owned files nobody else can write).
-	grep -q "^XLOGIN_BACKGROUND='background-dark-gray.png'" /etc/xlogin.conf 2> /dev/null || error "no /etc/xlogin.conf with the dark gray background"
+	grep -q "^XLOGIN_BACKGROUND='background-black.png'" /etc/xlogin.conf 2> /dev/null || error "no /etc/xlogin.conf with the black background"
 	for colour in black blue dark-gray gray green orange yellow; do
 		[[ -f "/usr/share/backgrounds/pivuan/background-${colour}.png" ]] || error "no /usr/share/backgrounds/pivuan/background-${colour}.png"
 		[[ "$(stat -c '%U %a' "/usr/share/xlogin/backgrounds/background-${colour}.png" 2> /dev/null)" == "root 644" ]] \
@@ -185,7 +185,8 @@ if [[ "${mode}" == pivuan-config ]]; then
 		error "${home}/.xinitrc does not start JWM"
 	fi
 	grep -q '/usr/lib/pivuan/audio-session' "${home}/.xinitrc" 2> /dev/null || error "${home}/.xinitrc does not run /usr/lib/pivuan/audio-session"
-	for f in /usr/lib/pivuan/audio-session /usr/lib/pivuan/pulse-session /usr/lib/pivuan/autostart /usr/lib/pivuan/jwm-desktop; do
+	for f in /usr/lib/pivuan/audio-session /usr/lib/pivuan/pulse-session /usr/lib/pivuan/autostart /usr/lib/pivuan/jwm-desktop \
+		/usr/lib/pivuan/keyboard; do
 		if [[ ! -x "${f}" ]]; then
 			error "no ${f}"
 		elif ! sh -n "${f}"; then
@@ -206,9 +207,12 @@ if [[ "${mode}" == pivuan-config ]]; then
 	grep -q 'exec:pavucontrol' /tmp/jwm-desktop.xml || error "the tray has no button for Volume Control"
 	grep -q 'autohide="off"' /tmp/jwm-desktop.xml || error "the panel hides without settings"
 	grep -q '<Tray x="0" y="-1" height="30" ' /tmp/jwm-desktop.xml || error "the panel is not 30 pixels high without settings"
-	grep -q '<Background>#2B2B2B</Background>' /tmp/jwm-desktop.xml || error "the panel is not Pivuan grey without settings"
-	grep -q '<Background type="scale">/usr/share/backgrounds/pivuan/background-dark-gray.png</Background>' /tmp/jwm-desktop.xml \
-		|| error "the default desktop background is not dark gray"
+	grep -q '<Background>#959597</Background>' /tmp/jwm-desktop.xml || error "the panel is not Pivuan grey (#959597) without settings"
+	[[ -f /usr/share/pixmaps/pivuan/pivuan-panel.png ]] || error "no /usr/share/pixmaps/pivuan/pivuan-panel.png (the menu button's logo on a grey panel)"
+	grep -q '<TrayButton icon="/usr/share/pixmaps/pivuan/pivuan-panel.png" popup="Pivuan menu">' /tmp/jwm-desktop.xml \
+		|| error "the menu button on the grey panel is not the outlined logo (pivuan-panel.png)"
+	grep -q '<Background type="scale">/usr/share/backgrounds/pivuan/background-black.png</Background>' /tmp/jwm-desktop.xml \
+		|| error "the default desktop background is not black"
 	# With settings, as Desktop Settings writes them: another background, a hidden panel, a
 	# program icon (Volume Control's .desktop file, org.pulseaudio.pavucontrol.desktop in
 	# pavucontrol 6), and one that is not installed (skipped).
@@ -258,7 +262,7 @@ if [[ "${mode}" == pivuan-config ]]; then
 	su -l -s /bin/sh -c /usr/lib/pivuan/jwm-desktop pivuan > /tmp/jwm-desktop-bad.xml
 	xml_ok < /tmp/jwm-desktop-bad.xml || error "/usr/lib/pivuan/jwm-desktop does not print valid XML (invalid settings)"
 	if ! grep -q '<Tray x="0" y="-1" height="30" ' /tmp/jwm-desktop-bad.xml \
-		|| ! grep -q '<Background>#2B2B2B</Background>' /tmp/jwm-desktop-bad.xml; then
+		|| ! grep -q '<Background>#959597</Background>' /tmp/jwm-desktop-bad.xml; then
 		error "invalid panel settings do not give the defaults"
 	fi
 	grep -q '>pivuan-desktop-settings</Program>' /etc/jwm/pivuan.jwmrc || error "the menu has no Desktop Settings"
