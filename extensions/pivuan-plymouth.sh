@@ -26,6 +26,10 @@ function post_repo_customize_image__install_pivuan_plymouth() {
 		"${SDCARD}/var/lib/dpkg/status"; then
 		exit_with_error "systemd was installed with plymouth" "${EXTENSION}"
 	fi
+
+	# Without its init script the screen stays frozen after the splash (plymouth-theme 1.0.1 and later).
+	compgen -G "${SDCARD}/etc/rc2.d/S??pivuan-splash" > /dev/null \
+		|| exit_with_error "the boot splash's init script (pivuan-splash) is not started at boot" "${EXTENSION}"
 }
 
 # cmdline.txt is written by pre_umount_final_image__write_raspi_cmdline (bcm2711.conf), after
