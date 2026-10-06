@@ -5,7 +5,9 @@
 #   1. simulates the install (apt-get -s, no recommends, as on the image) on top
 #      of the Pivuan base stack (sysvinit, elogind, eudev, ifupdown), and fails if
 #      systemd or systemd-sysv would be installed or apt cannot resolve it (XLibre,
-#      arm64 only, is left out; a desktop on XLibre fails if Xorg's server would come in);
+#      arm64 only, is left out; a desktop on XLibre fails if Xorg's server would come in;
+#      the Pivuan apt repository's packages for all architectures, such as the icon theme
+#      and the boot splash, come from its arm64 index, with their dependencies);
 #   2. checks every package also exists for arm64 in the Devuan archive (XLibre: in the
 #      Pivuan apt repository);
 #   3. does the same for the pivuan-config package's own dependencies;
@@ -90,6 +92,23 @@ jobs:
           curl -fsSL -o /usr/share/keyrings/brave-browser-archive-keyring.gpg "$base/brave-browser-archive-keyring.gpg"
           curl -fsSL -o /etc/apt/sources.list.d/brave-browser-release.sources "$base/brave-browser.sources"
           cat /etc/apt/sources.list.d/brave-browser-release.sources
+          apt-get update -q
+
+      - name: Add the Pivuan apt repository
+        run: |
+          set -eu
+          # The desktops install Pivuan packages for all architectures (pivuan-icon-theme,
+          # pivuan-plymouth-theme). The repository has only an arm64 index, which lists them;
+          # with arm64 added, apt installs them on amd64 too, so the simulation resolves them
+          # and their dependencies (plymouth must come with elogind, not systemd). The key is
+          # the repository's public one, as images get it (extensions/pivuan-apt.sh).
+          dpkg --add-architecture arm64
+          curl -fsSL -o /usr/share/keyrings/pivuan-archive-keyring.gpg \
+            https://rations.github.io/pivuan/pivuan-archive-keyring.gpg
+          printf '%s\n' 'Types: deb' 'URIs: https://rations.github.io/pivuan' 'Suites: excalibur' \
+            'Components: main' 'Architectures: arm64' \
+            'Signed-By: /usr/share/keyrings/pivuan-archive-keyring.gpg' \
+            > /etc/apt/sources.list.d/pivuan.sources
           apt-get update -q
 
       - name: Simulate install (amd64)
