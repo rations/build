@@ -23,7 +23,7 @@
 # libinput), if a menu icon is missing, or if any program or plug-in of the Pivuan apps misses
 # a library. MODE=pivuan-config also checks the desktop pivuan-config set up: the login
 # screen and its backgrounds, the session scripts, PulseAudio into JACK (with JACK's dummy
-# driver), Desktop Settings and the panel it makes.
+# driver), Desktop Settings and the panel it makes, the Pivuan menu (jgmenu) and Extract Here.
 #
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -186,7 +186,8 @@ if [[ "${mode}" == pivuan-config ]]; then
 	fi
 	grep -q '/usr/lib/pivuan/audio-session' "${home}/.xinitrc" 2> /dev/null || error "${home}/.xinitrc does not run /usr/lib/pivuan/audio-session"
 	for f in /usr/lib/pivuan/audio-session /usr/lib/pivuan/pulse-session /usr/lib/pivuan/autostart /usr/lib/pivuan/jwm-desktop \
-		/usr/lib/pivuan/keyboard; do
+		/usr/lib/pivuan/keyboard /usr/lib/pivuan/menu /usr/lib/pivuan/menu-items /usr/lib/pivuan/session \
+		/usr/lib/pivuan/wine-menu /usr/lib/pivuan/desktop-icons /usr/lib/pivuan/extract-here; do
 		if [[ ! -x "${f}" ]]; then
 			error "no ${f}"
 		elif ! sh -n "${f}"; then
@@ -265,8 +266,40 @@ if [[ "${mode}" == pivuan-config ]]; then
 		|| ! grep -q '<Background>#959597</Background>' /tmp/jwm-desktop-bad.xml; then
 		error "invalid panel settings do not give the defaults"
 	fi
-	grep -q '>pivuan-desktop-settings</Program>' /etc/jwm/pivuan.jwmrc || error "the menu has no Desktop Settings"
 	rm -rf "${home}/.config/pivuan/desktop.conf" "${home}/.config/pivuan/panel-icons"
+	# The Pivuan menu (jgmenu): the panel button, Alt+F1 and a right click on the desktop open it
+	# (/usr/lib/pivuan/menu), and /usr/lib/pivuan/menu-items makes it from the programs' .desktop
+	# files by category (/etc/xdg/menus/pivuan-applications.menu, through jgmenu's lx module).
+	grep -q '<TrayButton [^>]*popup="Pivuan menu">exec:/usr/lib/pivuan/menu panel</TrayButton>' /tmp/jwm-desktop.xml \
+		|| error "the panel's Pivuan button does not open the menu (/usr/lib/pivuan/menu)"
+	grep -q '<Mouse context="root" button="3">exec:/usr/lib/pivuan/menu pointer</Mouse>' /etc/jwm/pivuan.jwmrc \
+		|| error "a right click on the desktop does not open the menu"
+	grep -q '<Key mask="A" key="F1">exec:/usr/lib/pivuan/menu panel</Key>' /etc/jwm/pivuan.jwmrc || error "Alt+F1 does not open the menu"
+	for f in /etc/pivuan/jgmenurc /etc/xdg/menus/pivuan-applications.menu /usr/share/desktop-directories/pivuan-audio.directory; do
+		[[ -f "${f}" ]] || error "no ${f}"
+	done
+	command -v jgmenu > /dev/null || error "jgmenu is not installed"
+	su -l -s /bin/sh -c /usr/lib/pivuan/menu-items pivuan > /tmp/menu.csv 2> /tmp/menu.err || error "/usr/lib/pivuan/menu-items failed: $(cat /tmp/menu.err)"
+	for item in 'Terminal,lxterminal,' 'Home,pcmanfm ' 'Audio,^checkout(' 'Settings,^checkout(' 'Jack Graph,jack-graph,' \
+		'Volume Control,pavucontrol,' 'Desktop Settings,pivuan-desktop-settings,' 'On-screen Keyboard,/usr/lib/pivuan/keyboard toggle,' \
+		'Wine Configuration,winecfg,' 'Shut Down,/usr/lib/pivuan/session poweroff,'; do
+		grep -qF "${item}" /tmp/menu.csv || error "the menu has no ${item%%,*}"
+	done
+	if grep -qE '^(Pivuan Config|jgmenu|picom),' /tmp/menu.csv; then error "the menu lists Pivuan Config, jgmenu or picom"; fi
+	summary "- Menu: $(grep -o '^[^,]*,^checkout(' /tmp/menu.csv | cut -d, -f1 | tr '\n' ' ')"
+	# Extract Here: pcmanfm's action (libfm-modules runs actions) and the script, on a zip and a
+	# tar.gz with several files each, and a zip with one folder.
+	[[ -f /usr/share/file-manager/actions/pivuan-extract-here.desktop ]] || error "no Extract Here action for pcmanfm"
+	compgen -G '/usr/lib/*/libfm/modules/gtk-menu-actions.so' > /dev/null || error "libfm-modules is missing: pcmanfm shows no Extract Here"
+	su -l -s /bin/sh -c 'set -e; rm -rf /tmp/extract; mkdir -p /tmp/extract/in/top && cd /tmp/extract/in
+		echo a > a.txt; echo b > b.txt; echo c > top/c.txt
+		python3 -c "import zipfile; z = zipfile.ZipFile(\"../many.zip\", \"w\"); z.write(\"a.txt\"); z.write(\"b.txt\"); z.close(); z = zipfile.ZipFile(\"../one.zip\", \"w\"); z.write(\"top/c.txt\"); z.close()"
+		tar -czf ../many.tar.gz a.txt b.txt
+		cd .. && /usr/lib/pivuan/extract-here many.zip many.tar.gz one.zip' pivuan > /tmp/extract.log 2>&1 \
+		|| { cat /tmp/extract.log; error "Extract Here failed"; }
+	for f in many/a.txt "many (2)/b.txt" top/c.txt; do
+		[[ -f "/tmp/extract/${f}" ]] || error "Extract Here did not make /tmp/extract/${f}"
+	done
 	# GTK uses the Pivuan icons (pivuan-icon-theme), which inherit Numix's for the ones they lack.
 	grep -qx 'gtk-icon-theme-name=Pivuan' "${home}/.config/gtk-3.0/settings.ini" 2> /dev/null || error "GTK 3 does not use the Pivuan icons"
 	grep -q '^Inherits=.*Numix' /usr/share/icons/Pivuan/index.theme 2> /dev/null || error "the Pivuan icon theme does not inherit Numix"
