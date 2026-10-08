@@ -46,6 +46,7 @@ sysvinit-core
 toilet
 tzdata
 u-boot-tools
+unzip
 usbutils
 wget
 wireguard-tools
