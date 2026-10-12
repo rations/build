@@ -77,10 +77,11 @@ jobs:
         run: |
           set -eu
           apt-get update -q
-          # The union of what the nine apps' own CI and READMEs install (Debian names).
+          # The union of what the apps' own CI and READMEs install (Debian names).
           apt-get install -y -q --no-install-recommends \
             build-essential cmake ninja-build pkg-config git ca-certificates file dpkg-dev lintian python3 \
             libcairo2-dev libfreetype-dev libfontconfig-dev libx11-dev libxrandr-dev libjpeg-dev libpam0g-dev \
+            libcurl4-openssl-dev libxcomposite-dev libxcursor-dev libxi-dev libxinerama-dev libxrender-dev \
             libasound2-dev libjack-jackd2-dev lv2-dev liblilv-dev libsuil-dev libsratom-dev \
             libgtk-3-dev libgtk2.0-dev libgtkmm-3.0-dev libsndfile1-dev libsamplerate0-dev libpolkit-gobject-1-dev
 

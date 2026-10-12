@@ -55,6 +55,7 @@ depends=""    # added to what dpkg-shlibdeps finds
 recommends=""
 conffiles=""  # one path per line
 maint_dir=""  # directory with postinst/postrm to keep
+licences=()   # more licence texts for the copyright file, as "<what it covers>=<file>"
 
 desktop_entry() { # <file> <name> <comment> <exec> <icon>
 	install -d "$(dirname "$1")"
@@ -197,6 +198,54 @@ case "${pkg}" in
 		conffiles="/etc/pam.d/xlogin
 /etc/pam.d/xlogin-autologin"
 		;;
+	tone3000)
+		summary="TONE3000 amp and effects plug-in (VST3, LV2) and standalone"
+		description="Plays Neural Amp Modeler captures and impulse responses from TONE3000 in a
+ chain of amp, cabinet and effect blocks: a VST3 and an LV2 plug-in and a standalone
+ program. Tones are downloaded from tone3000.com; factory presets are included."
+		# JUCE loads these with dlopen, so dpkg-shlibdeps cannot see them: libcurl for the tone
+		# downloads (either build), JACK for the standalone, and zenity (or kdialog) for its
+		# file dialogs.
+		depends="libcurl4t64 | libcurl3t64-gnutls"
+		recommends="libjack-jackd2-0 | libjack0, zenity"
+		submodules "${src}" plugin/NeuralAmpModelerCore plugin/AudioDSPTools
+		submodules "${src}/plugin/NeuralAmpModelerCore" Dependencies/eigen Dependencies/AudioDSPTools
+		# CMake fetches JUCE, FreeType and GoogleTest itself (CPM, pinned in CMakeLists.txt).
+		# No CLAP: Pivuan's hosts load VST3 and LV2.
+		cmake -S "${src}" -B "${src}/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_TOOLCHAIN_FILE="${src}/cmake/linux-toolchain.cmake" -DBUILD_CLAP=OFF -DBUILD_AAX=OFF
+		cmake --build "${src}/build" -j"${jobs}" --target TONE3000_VST3 TONE3000_LV2 TONE3000_Standalone
+		art="${src}/build/plugin/TONE3000_artefacts/Release"
+		install -d "${stage}/usr/lib/vst3" "${stage}/usr/lib/lv2"
+		cp -a "${art}/VST3/TONE3000.vst3" "${stage}/usr/lib/vst3/"
+		cp -a "${art}/LV2/TONE3000.lv2" "${stage}/usr/lib/lv2/"
+		install -Dm 0755 "${art}/Standalone/TONE3000" "${stage}/usr/bin/TONE3000"
+		# The factory presets go where the plug-in looks for a system-wide copy on Linux
+		# (plugin/src/PresetManager.cpp); its own tarball copies them into each home instead.
+		install -d "${stage}/usr/share/TONE3000/Presets/Factory"
+		install -m 0644 "${src}"/resources/factory-presets/*.t3kpreset "${stage}/usr/share/TONE3000/Presets/Factory/"
+		install -Dm 0644 "${src}/script/installer/linux/tone3000.png" "${stage}/usr/share/icons/hicolor/512x512/apps/tone3000.png"
+		desktop_entry "${stage}/usr/share/applications/tone3000.desktop" TONE3000 "Play NAM captures and IRs from TONE3000" TONE3000 tone3000
+		# What is built into the binaries besides TONE3000's own MIT code. JUCE is dual-licensed
+		# (AGPLv3 or a commercial licence); a build from the public source uses it under the
+		# AGPLv3, so the package is distributed under those terms, its source at the commit above.
+		awk '/^\/\*$/ { on = 1 } on { print } on && /\*\/[[:space:]]*$/ { exit }' \
+			"${src}/plugin/AudioDSPTools/dsp/ResamplingContainer/Dependencies/LanczosResampler.h" > "${work}/iplug2-licence"
+		printf 'The JUCE framework is used under the GNU Affero General Public License version 3:\n/usr/share/common-licenses/AGPL-3\n\n' > "${work}/juce-agpl"
+		cat "${src}/libs/juce/LICENSE.md" >> "${work}/juce-agpl"
+		licences=(
+			"JUCE 9 (modules built in)=${work}/juce-agpl"
+			"NeuralAmpModelerCore (MIT)=${src}/plugin/NeuralAmpModelerCore/LICENSE"
+			"AudioDSPTools (MIT)=${src}/plugin/AudioDSPTools/LICENSE"
+			"AudioDSPTools' Lanczos resampler, from iPlug2 and WDL (zlib-style)=${work}/iplug2-licence"
+			"Eigen (MPL-2.0, /usr/share/common-licenses/MPL-2.0)=${src}/plugin/NeuralAmpModelerCore/Dependencies/eigen/COPYING.README"
+			"FreeType (built in; the FreeType License)=${src}/libs/freetype/docs/FTL.TXT"
+			"Arimo font (Apache-2.0, /usr/share/common-licenses/Apache-2.0)=${src}/plugin/ui/assets/Arimo-LICENSE.txt"
+			"Roboto Mono font (Apache-2.0)=${src}/plugin/ui/assets/RobotoMono-LICENSE.txt"
+			"QR Code generator library (MIT)=${src}/plugin/ui/vendor/qrcodegen/LICENSE.txt"
+		)
+		[[ -s "${work}/iplug2-licence" ]] || die "the iPlug2 licence block in LanczosResampler.h moved"
+		;;
 	*)
 		die "no recipe"
 		;;
@@ -210,6 +259,11 @@ install -d "${stage}/usr/share/doc/${pkg}"
 		[[ -f "${src}/${f}" ]] || continue
 		printf '\n==> %s <==\n\n' "${f}"
 		cat "${src}/${f}"
+	done
+	for l in "${licences[@]}"; do
+		[[ -f "${l#*=}" ]] || die "licence file missing: ${l#*=}"
+		printf '\n==> %s <==\n\n' "${l%%=*}"
+		cat "${l#*=}"
 	done
 } > "${stage}/usr/share/doc/${pkg}/copyright"
 rm -f "${stage}/usr/share/doc/${pkg}/copyright.gz"
