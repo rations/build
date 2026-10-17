@@ -2,14 +2,13 @@
 # conflicts, upstream changes to files Pivuan changed, and anything that brings systemd into the
 # parts Pivuan images use (.github/pivuan/upstream-check.sh). Changes nothing: it only reports.
 #
-# Weekly, and by hand. The run fails (and GitHub emails) when something needs attention before
+# Run by hand. The run fails (and GitHub emails) when something needs attention before
 # merging; the report is on the run's page and in the "upstream-report" artifact.
 
 name: Pivuan upstream check
 
+# Pivuan: started by hand only (Actions minutes): no push, pull request or schedule triggers.
 on:
-  schedule:
-    - cron: "47 2 * * 1" # Mondays 02:47 UTC
   workflow_dispatch:
 
 permissions:

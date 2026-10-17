@@ -3,7 +3,8 @@
 This fork builds **Pivuan**: Devuan (sysvinit, no systemd) images for the Raspberry Pi,
 using the Armbian build framework. See `pre-plan.md` in the repository root.
 
-Workflows:
+Workflows (all started by hand from the Actions tab, to save Actions minutes: none runs on a
+push, a pull request or a schedule):
 
 - `pivuan-build.yml`: **Pivuan image build**. Run it by hand from the Actions tab
   ("Run workflow"). It builds on a GitHub-hosted arm64 runner and uploads the
@@ -12,11 +13,12 @@ Workflows:
   (e.g. `26.11.0.14`). With **publish** ticked it also updates the Pivuan apt
   repository (https://rations.github.io/pivuan, branch `gh-pages` of rations/pivuan)
   and makes a GitHub Release with the image in rations/pivuan.
-- `pivuan-kernel-pin.yml`: **Pivuan kernel pin**, Mondays 03:17 UTC and by hand. The
+- `pivuan-kernel-pin.yml`: **Pivuan kernel pin**, by hand. The
   kernel is pinned to one commit of the Foundation's `rpi-6.18.y` branch
   (`config/sources/families/bcm2711.conf`, the `pivuan-kernel-pin` marker). When the
   branch has a new point release (6.18.53 -> 6.18.54, where the security fixes
-  arrive) it moves the pin, pushes it to `pivuan` and starts a published build.
+  arrive) it moves the pin and pushes it to `pivuan`; then run the image build with
+  publish ticked.
   "force" moves the pin to the branch head without a new point release.
 - `pivuan-desktop-check.yml`: **Pivuan desktop package check**, by hand. Checks that a
   pivuan-config desktop (and Brave) installs on Devuan without systemd, for arm64.

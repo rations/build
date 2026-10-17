@@ -10,6 +10,7 @@
 
 name: Pivuan audio apps
 
+# Pivuan: started by hand only (Actions minutes): no push, pull request or schedule triggers.
 on:
   workflow_dispatch:
     inputs:
@@ -21,11 +22,6 @@ on:
         description: "Publish the packages to the Pivuan apt repository"
         type: boolean
         default: false
-  push:
-    branches: [pivuan]
-    paths:
-      - ".github/pivuan/apps/**"
-      - ".github/workflows/pivuan-apps.yml"
 
 permissions:
   contents: read

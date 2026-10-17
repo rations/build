@@ -3,16 +3,16 @@
 # The image builds use one fixed commit of the Foundation's rpi-6.x.y branch (the
 # "pivuan-kernel-pin" marker and KERNELBRANCH="commit:..." in config/sources/families/bcm2711.conf),
 # so the compiled kernel is cached and reused. Security fixes arrive as stable point releases
-# (6.18.53 -> 6.18.54 ...). Once a week this job reads the kernel version at the branch head; when it
-# is newer than the pinned one it moves the pin to that commit, pushes it to the default branch and
-# starts "Pivuan image build" with publish=true (new image release + apt repository update).
+# (6.18.53 -> 6.18.54 ...). Run by hand, this job reads the kernel version at the branch head; when
+# it is newer than the pinned one it moves the pin to that commit and pushes it to the default
+# branch. Then start "Pivuan image build" with publish=true by hand (new image release + apt
+# repository update).
 # Commits between point releases (Pi-specific changes) do not move the pin.
 
 name: Pivuan kernel pin
 
+# Pivuan: started by hand only (Actions minutes): no push, pull request or schedule triggers.
 on:
-  schedule:
-    - cron: "17 3 * * 1" # Mondays 03:17 UTC
   workflow_dispatch:
     inputs:
       force:
@@ -22,7 +22,6 @@ on:
 
 permissions:
   contents: write # push the new pin
-  actions: write # start the image build
 
 concurrency:
   group: pivuan-kernel-pin
@@ -99,9 +98,3 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "Pivuan: kernel pin to ${{ steps.check.outputs.version }}"
           git push origin "HEAD:${{ github.event.repository.default_branch }}"
-
-      - name: Start the published image build
-        if: steps.check.outputs.move == 'yes'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run pivuan-build.yml --repo "${{ github.repository }}" --ref "${{ github.event.repository.default_branch }}" -f publish=true
