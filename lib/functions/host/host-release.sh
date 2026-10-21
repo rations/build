@@ -49,7 +49,8 @@ function obtain_hostarch_only() {
 function obtain_hostrelease_only() {
 	# obtain the host release either from os-release or debian_version
 	declare -g HOSTRELEASE
-	HOSTRELEASE="$(cat /etc/os-release | grep VERSION_CODENAME | cut -d"=" -f2)"
+	# Pivuan: tr drops the quotes Devuan puts around the value (VERSION_CODENAME="excalibur").
+	HOSTRELEASE="$(cat /etc/os-release | grep VERSION_CODENAME | cut -d"=" -f2 | tr -d '"')"
 	[[ -z $HOSTRELEASE ]] && HOSTRELEASE="$(cut -d'/' -f1 /etc/debian_version)"
 	display_alert "Build host OS release" "${HOSTRELEASE:-(unknown)}" "info"
 }
