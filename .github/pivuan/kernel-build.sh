@@ -13,7 +13,8 @@
 #
 # When ghcr.io already has the kernel's version it says so and builds nothing. An x86-64 PC
 # cross-compiles (no Docker: compile.sh runs as root through sudo, and the first run installs its
-# build dependencies with apt).
+# build dependencies with apt). Everything it downloads (the kernel source, the toolchain) stays
+# in cache/ of this checkout, so later builds only fetch what changed.
 #
 # Usage: kernel-build.sh [--push] [current|edge|legacy]
 #   --push    push the kernel to ghcr.io once it is built (it is kept in output/packages-hashed,
@@ -48,8 +49,11 @@ command -v oras > /dev/null || {
 	exit 1
 }
 
+# KERNEL_GIT=shallow: start the kernel source from Armbian's shallow tree of this kernel series
+# (about 330 MB, once) instead of the whole Linux history (about 3.9 GB). Pivuan builds one
+# series, so the history is not needed. The tree stays in cache/git-bare/ for later builds.
 compile() {
-	"${src}/compile.sh" kernel BOARD=rpi4b BRANCH="${branch}" KERNEL_CONFIGURE=no PREFER_DOCKER=no "$@"
+	"${src}/compile.sh" kernel BOARD=rpi4b BRANCH="${branch}" KERNEL_CONFIGURE=no PREFER_DOCKER=no KERNEL_GIT=shallow "$@"
 }
 
 # The version, local file and ghcr.io name this checkout gives the kernel (one JSON line on stdout).
