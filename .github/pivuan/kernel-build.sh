@@ -17,12 +17,15 @@
 # in cache/ of this checkout, so later builds only fetch what changed.
 #
 # Usage: kernel-build.sh [--push] [current|edge|legacy]
+#        kernel-build.sh --login
 #   --push    push the kernel to ghcr.io once it is built (it is kept in output/packages-hashed,
 #             so running again with --push does not compile it again)
 #   branch    the kernel branch, current by default
-# Needs sudo, python3 and oras (sudo apt install oras). Before the first push, log in once with a
-# classic GitHub token that has write:packages (oras keeps it in ~/.docker/config.json):
-#   oras login ghcr.io -u rations
+#   --login   log in to ghcr.io (asks for the token) and stop
+# Needs sudo, python3 and oras (sudo apt install oras). Before the first push, log in once with
+# --login and a classic GitHub token that has write:packages (not repo). The login is kept in
+# ~/.config/pivuan/ghcr-login.json (not oras's default ~/.docker/config.json) until the token
+# expires; then regenerate the token on GitHub and log in again.
 # The first push makes a private package. Make it public once (github.com/rations/build ->
 # Packages -> build/kernel-bcm2711-current -> Package settings -> Change visibility), or image
 # builds cannot fetch it.
@@ -31,13 +34,15 @@
 set -euo pipefail
 
 push=no
+login=no
 branch=current
 for arg in "$@"; do
 	case "${arg}" in
 		--push) push=yes ;;
+		--login) login=yes ;;
 		current | edge | legacy) branch="${arg}" ;;
 		*)
-			echo "Usage: $0 [--push] [current|edge|legacy]" >&2
+			echo "Usage: $0 [--push] [current|edge|legacy] | --login" >&2
 			exit 1
 			;;
 	esac
@@ -48,6 +53,17 @@ command -v oras > /dev/null || {
 	echo "oras is missing: sudo apt install oras" >&2
 	exit 1
 }
+
+# Every oras call uses this login file.
+auth="${XDG_CONFIG_HOME:-${HOME}/.config}/pivuan/ghcr-login.json"
+ora() {
+	oras "$@" --registry-config "${auth}"
+}
+if [[ "${login}" == yes ]]; then
+	# Readable by this user only.
+	(umask 077 && mkdir -p "$(dirname "${auth}")" && oras login --registry-config "${auth}" ghcr.io -u rations)
+	exit 0
+fi
 
 # KERNEL_GIT=shallow: start the kernel source from Armbian's shallow tree of this kernel series
 # (about 330 MB, once) instead of the whole Linux history (about 3.9 GB). Pivuan builds one
@@ -68,7 +84,7 @@ else:
     sys.exit("compile.sh gave no kernel information")' <<< "${info}")
 echo "Kernel ${branch}: ${version}"
 
-if oras manifest fetch "${target}" > /dev/null 2>&1; then
+if ora manifest fetch "${target}" > /dev/null 2>&1; then
 	echo "ghcr.io has it (${target}): nothing to build."
 	exit 0
 fi
@@ -89,10 +105,10 @@ fi
 # The same layout as the framework's own push (oras_push_artifact_file), so image builds can pull it.
 (
 	cd "$(dirname "${file}")"
-	oras push \
+	ora push \
 		--annotation "org.opencontainers.image.description=Pivuan kernel ${branch} ${version}" \
 		--annotation "org.opencontainers.image.source=https://github.com/rations/build" \
 		"${target}" "$(basename "${file}"):application/vnd.unknown.layer.v1+tar"
 )
-oras manifest fetch "${target}" > /dev/null
+ora manifest fetch "${target}" > /dev/null
 echo "Pushed: ${target}"

@@ -30,7 +30,7 @@ too much compute, and a kernel is the heaviest job). On an x86-64 or arm64 Devua
 PC, from this checkout:
 
     sudo apt install oras
-    oras login ghcr.io -u rations     # once; a classic token with write:packages
+    .github/pivuan/kernel-build.sh --login    # once; a classic token with write:packages
     .github/pivuan/kernel-build.sh --push
 
 It works out the kernel's version, does nothing if ghcr.io already has it, and otherwise
