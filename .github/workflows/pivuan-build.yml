@@ -13,6 +13,11 @@
 # Versions: every run builds its packages as <VERSION without "-trunk">.<run number> (e.g. 26.11.0.14),
 # so each build is newer than the last one for apt.
 #
+# Kernel: this workflow never compiles it (DONT_BUILD_ARTIFACTS=kernel; it used too much compute).
+# It takes the kernel from output/packages-hashed (cache) or from ghcr.io/rations/build, where
+# .github/pivuan/kernel-build.sh --push puts it from a PC. If the build stops with "Artifact 'kernel'
+# is in DONT_BUILD_ARTIFACTS", run that script on this commit first.
+#
 # Publishing (publish=true; set it after "Pivuan kernel pin" moves the pin): the packages go to the
 # Pivuan apt repository on GitHub Pages of PIVUAN_REPO (https://rations.github.io/pivuan, branch
 # gh-pages, last 3 versions of each package) and the image becomes a GitHub Release there.
@@ -175,6 +180,7 @@ jobs:
           # cached directories and the keyring path are plain host paths.
           # KEEP_HASHED_DEB_ARTIFACTS=yes: keep the unversioned packages (the compiled kernel) in
           # output/packages-hashed; every run gives them a new version, so they must be reusable.
+          # DONT_BUILD_ARTIFACTS=kernel: fail instead of compiling a kernel missing from ghcr.io.
           ./compile.sh build \
             BOARD="${BOARD}" \
             BRANCH="${KERNEL_BRANCH}" \
@@ -187,6 +193,7 @@ jobs:
             COMPRESS_OUTPUTIMAGE=sha,xz \
             REVISION="${{ steps.pivuan.outputs.revision }}" \
             KEEP_HASHED_DEB_ARTIFACTS=yes \
+            DONT_BUILD_ARTIFACTS=kernel \
             PIVUAN_APT_KEY_FILE="${{ steps.pivuan.outputs.key_file }}" \
             DEVUAN_KEYRING_FILE="${{ steps.keyring.outputs.file }}"
 
@@ -293,6 +300,7 @@ jobs:
               echo "Download it from the **Artifacts** section of this run, then flash the .img.xz (e.g. with balenaEtcher or \`xzcat … | sudo dd of=/dev/sdX bs=4M conv=fsync\`)."
             else
               echo "No image was produced. See the **pivuan-logs** artifact."
+              echo "If the kernel was missing (\"is in DONT_BUILD_ARTIFACTS\"), run \`.github/pivuan/kernel-build.sh --push\` on a PC, then run this again."
             fi
             echo ""
             df -h / | sed 's/^/    /'

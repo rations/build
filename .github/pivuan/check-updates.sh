@@ -8,7 +8,7 @@
 #                 against the head of the packaging repository
 #
 # Not checked: vstbridge (its workflow always builds the head of rations/vstbridge's arm64
-# branch) and the kernel ("Pivuan kernel pin" moves that pin every week).
+# branch) and the kernel ("Pivuan kernel pin" checks that pin, then kernel-build.sh builds it).
 #
 # Usage: check-updates.sh [xlibre.conf]
 #   xlibre.conf defaults to ../pivuan/xlibre/xlibre.conf next to this checkout of rations/build,

@@ -344,7 +344,8 @@ function artifact_kernel_cli_adapter_config_prep() {
 }
 
 function artifact_kernel_get_default_oci_target() {
-	artifact_oci_target_base="${OCI_SERVER}/${OCI_PATH}/"
+	# Pivuan: KERNEL_OCI_PATH gives kernels their own registry path (set in the family config).
+	artifact_oci_target_base="${OCI_SERVER}/${KERNEL_OCI_PATH:-${OCI_PATH}}/"
 }
 
 function artifact_kernel_is_available_in_local_cache() {

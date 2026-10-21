@@ -2,11 +2,12 @@
 #
 # The image builds use one fixed commit of the Foundation's rpi-6.x.y branch (the
 # "pivuan-kernel-pin" marker and KERNELBRANCH="commit:..." in config/sources/families/bcm2711.conf),
-# so the compiled kernel is cached and reused. Security fixes arrive as stable point releases
+# so the kernel only changes when wanted. Security fixes arrive as stable point releases
 # (6.18.53 -> 6.18.54 ...). Run by hand, this job reads the kernel version at the branch head; when
 # it is newer than the pinned one it moves the pin to that commit and pushes it to the default
-# branch. Then start "Pivuan image build" with publish=true by hand (new image release + apt
-# repository update).
+# branch. Then pull it, build and push the kernel on a PC (.github/pivuan/kernel-build.sh --push:
+# the image build does not compile kernels), and start "Pivuan image build" with publish=true
+# (new image release + apt repository update).
 # Commits between point releases (Pi-specific changes) do not move the pin.
 
 name: Pivuan kernel pin
@@ -73,7 +74,7 @@ jobs:
             echo "- Pinned: ${pinned_version} (\`${pinned_sha:0:12}\`)"
             echo "- Branch head: ${head_version} (\`${head_sha:0:12}\`)"
             if [[ "${move}" == yes ]]; then
-              echo "- **Moving the pin** to ${head_version} and starting a published image build."
+              echo "- **Moving the pin** to ${head_version}. Next: pull, run \`.github/pivuan/kernel-build.sh --push\` on a PC, then the image build with publish."
             else
               echo "- No new point release; pin unchanged."
             fi
