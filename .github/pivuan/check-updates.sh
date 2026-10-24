@@ -86,12 +86,36 @@ else
 		failed=1
 	}
 fi
-while read -r name source tag _ packaging packaging_commit version; do
+while read -r name source tag commit packaging packaging_commit version; do
 	# Release tags are <prefix><version>, e.g. xlibre-xserver-25.2.2; release candidates are left out.
 	prefix="$(sed -E 's/[0-9]+(\.[0-9]+)*$//' <<< "${tag}")"
+	# Pivuan: a pin on a release branch (release/25.2): its prefix comes from the repository
+	# (xlibre-xserver-), and the release it is based on from the version (2:25.2.2+git...).
+	branch=""
+	if [[ "${tag}" == release/* ]]; then
+		branch="${tag}"
+		prefix="xlibre-${source##*/}-"
+		tag="${prefix}$(sed -E 's/^[0-9]+://; s/[+~-].*$//' <<< "${version}")"
+	fi
 	latest="$(git ls-remote --tags --refs "${source}" "refs/tags/${prefix}*" 2>/dev/null |
 		sed 's|.*refs/tags/||' | grep -E "^${prefix}[0-9]+(\.[0-9]+)*$" | sort -V | tail -1)"
-	if [[ -z "${latest}" ]]; then
+	if [[ -n "${branch}" ]]; then
+		head="$(remote_head "${source}" "refs/heads/${branch}")"
+		if [[ -z "${head}" ]]; then
+			echo "  ${name}: could not read ${branch} of ${source}"
+			failed=1
+		elif [[ "${head}" == "${commit}" ]]; then
+			echo "  ${name} ${version}: ${branch} has nothing newer"
+		else
+			newer=1
+			echo "  ${name} ${version}: ${branch} is newer, ${head}"
+			commits_between "${source#https://github.com/}" "${commit}" "${head}"
+		fi
+		if [[ -n "${latest}" && "${latest}" != "${tag}" ]]; then
+			newer=1
+			echo "  ${name}: newer release ${latest}: pin it instead of ${branch} if it has the fixes"
+		fi
+	elif [[ -z "${latest}" ]]; then
 		echo "  ${name}: could not read the tags of ${source}"
 		failed=1
 	elif [[ "${latest}" == "${tag}" ]]; then
