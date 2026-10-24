@@ -1,20 +1,24 @@
 #!/bin/bash
 #
 # Say which pinned Pivuan packages have something newer upstream. Run it before the
-# "Pivuan audio apps" and "XLibre for Pivuan" workflows; it only reports and changes nothing.
+# "Pivuan audio apps", "XLibre for Pivuan" and "Onboard for Pivuan" workflows; it only reports
+# and changes nothing.
 #
-#   apps.conf     each app's commit against the head of its master branch, with the new commits;
+#   apps.conf     each app's commit against the head of its default branch, with the new commits;
+#                 for an upstream app pinned at a release tag (TONE3000), the newest release tag;
 #                 for an app that follows its branch, whether its VERSION is published yet
 #   xlibre.conf   each XLibre tag against the newest release tag, and the packaging commit
 #                 against the head of the packaging repository
+#   onboard.conf  Devuan's onboard version that Pivuan rebuilds, against the newest in excalibur,
+#                 excalibur-updates and excalibur-security (Pivuan's would hide a newer one)
 #
 # Not checked: vstbridge (its workflow always builds the head of rations/vstbridge's arm64
 # branch) and the kernel ("Pivuan kernel pin" checks that pin, then kernel-build.sh builds it).
 #
 # Usage: check-updates.sh [xlibre.conf]
 #   xlibre.conf defaults to ../pivuan/xlibre/xlibre.conf next to this checkout of rations/build,
-#   or else the copy on rations/pivuan master.
-# Needs git, curl and python3. Set GITHUB_TOKEN to raise GitHub's API limit (60 requests an hour
+#   or else the copy on rations/pivuan master; onboard.conf likewise from ../pivuan/onboard/.
+# Needs git, curl, xz and python3. Set GITHUB_TOKEN to raise GitHub's API limit (60 requests an hour
 # without it; each app with new commits uses one).
 # Exit status: 0 when everything is up to date, 1 when something is newer, 2 on an error.
 #
@@ -23,6 +27,7 @@ set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 apps_conf="${here}/apps/apps.conf"
 xlibre_conf="${1:-${here}/../../../pivuan/xlibre/xlibre.conf}"
+onboard_conf="$(dirname "${xlibre_conf}")/../onboard/onboard.conf"
 newer=0
 failed=0
 
@@ -62,15 +67,33 @@ while read -r pkg url commit ver rev; do
 		fi
 		continue
 	fi
-	head="$(remote_head "${url}" refs/heads/master)"
+	# Pivuan: an app from outside rations pinned at a release tag's commit (TONE3000) is checked
+	# against its newest release tag (vX.Y.Z, no -beta or -alpha), not its branch, which moves
+	# between releases. Pivuan's own apps are checked against their branch.
+	tags=""
+	[[ "${url}" == https://github.com/rations/* ]] || tags="$(git ls-remote --tags "${url}" 2>/dev/null)"
+	pinned="$(awk -v c="${commit}" '$1 == c { sub(".*refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2 }' <<< "${tags}" |
+		grep -E '^v?[0-9]+(\.[0-9]+)*$' | head -1)"
+	if [[ -n "${pinned}" ]]; then
+		latest="$(sed -E 's|.*refs/tags/||; s|\^\{\}$||' <<< "${tags}" | grep -E '^v?[0-9]+(\.[0-9]+)*$' | sort -uV | tail -1)"
+		if [[ "${latest}" == "${pinned}" ]]; then
+			echo "  ${pkg} ${ver}-pivuan${rev}: ${pinned} is the newest release"
+		else
+			newer=1
+			echo "  ${pkg} ${ver}-pivuan${rev}: newer release ${latest} (pinned ${pinned})"
+		fi
+		continue
+	fi
+	# The default branch (master, or main upstream).
+	head="$(remote_head "${url}" HEAD)"
 	if [[ -z "${head}" ]]; then
-		echo "  ${pkg}: could not read master of ${url}"
+		echo "  ${pkg}: could not read the default branch of ${url}"
 		failed=1
 	elif [[ "${head}" == "${commit}" ]]; then
 		echo "  ${pkg} ${ver}-pivuan${rev}: up to date"
 	else
 		newer=1
-		echo "  ${pkg} ${ver}-pivuan${rev}: master is newer, ${head}"
+		echo "  ${pkg} ${ver}-pivuan${rev}: the default branch is newer, ${head}"
 		commits_between "${url#https://github.com/}" "${commit}" "${head}"
 	fi
 done < <(awk '!/^#/ && NF' "${apps_conf}")
@@ -137,13 +160,46 @@ while read -r name source tag commit packaging packaging_commit version; do
 	fi
 done < <(awk '!/^#/ && NF' <<< "${xlibre:-}")
 
+# Pivuan: Onboard, rebuilt from Devuan's source with Pivuan's patches.
+echo
+if [[ -f "${onboard_conf}" ]]; then
+	echo "Onboard (${onboard_conf}):"
+	onboard="$(cat "${onboard_conf}")"
+else
+	echo "Onboard (rations/pivuan master, onboard/onboard.conf):"
+	onboard="$(curl -fsS https://raw.githubusercontent.com/rations/pivuan/master/onboard/onboard.conf)" || {
+		echo "  could not read onboard.conf"
+		failed=1
+	}
+fi
+read -r onboard_devuan onboard_version < <(awk '!/^#/ && NF' <<< "${onboard:-}")
+if [[ -n "${onboard_devuan:-}" ]]; then
+	devuan=""
+	for suite in excalibur excalibur-updates excalibur-security; do
+		devuan+="$(curl -fsS "http://deb.devuan.org/merged/dists/${suite}/main/binary-arm64/Packages.xz" 2>/dev/null |
+			xz -dc 2>/dev/null | awk '/^Package: onboard$/ { p = 1 } p && /^Version:/ { print $2; p = 0 }')"$'\n'
+	done
+	latest="$(grep . <<< "${devuan}" | sort -V | tail -1)"
+	if [[ -z "${latest}" ]]; then
+		echo "  onboard: could not read Devuan's onboard version"
+		failed=1
+	elif dpkg --compare-versions "${latest}" le "${onboard_devuan}" 2>/dev/null ||
+		[[ "${latest}" == "${onboard_devuan}" ]]; then
+		echo "  onboard ${onboard_version}: Devuan's ${onboard_devuan} is the newest"
+	else
+		newer=1
+		echo "  onboard ${onboard_version}: Devuan has ${latest} (pinned ${onboard_devuan}): rebuild from it"
+	fi
+fi
+
 echo
 if ((failed)); then
 	echo "Some checks failed (see above)."
 	exit 2
 elif ((newer)); then
 	echo "To update an app: in apps.conf set the new commit and version (revision 1), or bump only"
-	echo "the revision if the version did not change. To update XLibre, see the top of xlibre.conf."
+	echo "the revision if the version did not change. To update XLibre or Onboard, see the top of"
+	echo "xlibre.conf or onboard.conf."
 	exit 1
 fi
 echo "Everything is up to date."
