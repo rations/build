@@ -5,9 +5,10 @@
 # libraries as Devuan excalibur, so dpkg-shlibdeps writes Depends that resolve on Pivuan.
 #
 # Usage: build-app.sh <package> [out-dir]      (out-dir default: ./out)
+#        build-app.sh --resolve <package>      print "<version> <commit>" it would build
 #
 # Each app is built with its own build system and release scripts, at the commit pinned in
-# apps.conf, and staged into Debian paths:
+# apps.conf (or the newest on the branch named there), and staged into Debian paths:
 #   programs            /usr/bin
 #   LV2 and VST3        /usr/lib/lv2/<bundle>.lv2, /usr/lib/vst3/<bundle>.vst3
 #   menu entries, icons /usr/share/applications, /usr/share/icons/hicolor
@@ -16,8 +17,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-pkg="${1:?usage: build-app.sh <package> [out-dir]}"
-out="$(mkdir -p "${2:-out}" && cd "${2:-out}" && pwd)"
+resolve=0
+[[ "${1:-}" != --resolve ]] || { resolve=1; shift; }
+pkg="${1:?usage: build-app.sh [--resolve] <package> [out-dir]}"
+((resolve)) || out="$(mkdir -p "${2:-out}" && cd "${2:-out}" && pwd)"
 
 die() {
 	echo "::error::${pkg}: $*" >&2
@@ -25,8 +28,10 @@ die() {
 }
 
 read -r _ repo commit upstream revision < <(awk -v p="${pkg}" '$1 == p' "${here}/apps.conf") || die "not in apps.conf"
-[[ "${commit}" =~ ^[0-9a-f]{40}$ ]] || die "apps.conf needs a full commit hash"
-version="${upstream}-pivuan${revision}"
+# Pivuan: a branch name instead of a commit follows that branch (its newest commit when this
+# runs), and VERSION instead of a version reads it from the VERSION file at that commit.
+[[ "${commit}" =~ ^[0-9a-f]{40}$ || "${commit}" =~ ^(master|main)$ ]] \
+	|| die "apps.conf needs a full commit hash, or master or main"
 arch="$(dpkg --print-architecture)"
 jobs="$(nproc)"
 
@@ -36,11 +41,24 @@ src="${work}/src"
 stage="${work}/stage"
 mkdir -p "${stage}"
 
-# The source at the pinned commit; submodules at the commits it pins (only those named).
+# The source at the pinned commit (or the branch's newest); submodules at the commits it pins
+# (only those named).
 git init -q "${src}"
 git -C "${src}" remote add origin "${repo}"
 git -C "${src}" fetch -q --depth 1 origin "${commit}"
 git -C "${src}" checkout -q FETCH_HEAD
+commit="$(git -C "${src}" rev-parse HEAD)"
+if [[ "${upstream}" == VERSION ]]; then
+	[[ -f "${src}/VERSION" ]] || die "no VERSION file at ${commit}"
+	upstream="$(tr -d '[:space:]' < "${src}/VERSION")"
+fi
+# A Debian upstream version: the revision follows the last hyphen, so none in it.
+[[ "${upstream}" =~ ^[0-9][0-9A-Za-z.+~]*$ ]] || die "not a version: ${upstream}"
+version="${upstream}-pivuan${revision}"
+if ((resolve)); then
+	echo "${version} ${commit}"
+	exit 0
+fi
 submodules() { # <dir> <path>...
 	local dir="$1"
 	shift

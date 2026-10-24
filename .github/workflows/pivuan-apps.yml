@@ -75,13 +75,37 @@ jobs:
           apt-get update -q
           # The union of what the apps' own CI and READMEs install (Debian names).
           apt-get install -y -q --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git ca-certificates file dpkg-dev lintian python3 \
+            build-essential cmake ninja-build pkg-config git ca-certificates curl file dpkg-dev lintian python3 \
             libcairo2-dev libfreetype-dev libfontconfig-dev libx11-dev libxrandr-dev libjpeg-dev libpam0g-dev \
             libcurl4-openssl-dev libxcomposite-dev libxcursor-dev libxi-dev libxinerama-dev libxrender-dev \
             libasound2-dev libjack-jackd2-dev lv2-dev liblilv-dev libsuil-dev libsratom-dev \
             libgtk-3-dev libgtk2.0-dev libgtkmm-3.0-dev libsndfile1-dev libsamplerate0-dev libpolkit-gobject-1-dev
 
       - uses: actions/checkout@v4
+
+      # Pivuan: a published version can never be reused. An app that follows its branch
+      # (apps.conf "master VERSION") gets its version from that branch, so check it before the
+      # build: bump VERSION in the app (or the revision in apps.conf) when it is already there.
+      - name: Not published yet
+        if: inputs.publish
+        run: |
+          set -euo pipefail
+          pinned="$(awk -v p="${APP}" '$1 == p { print $3 }' .github/pivuan/apps/apps.conf)"
+          if [[ "${pinned}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "${APP} is pinned at ${pinned}"
+            exit 0
+          fi
+          read -r version commit < <(bash .github/pivuan/apps/build-app.sh --resolve "${APP}")
+          echo "${APP} ${version}, from ${commit}"
+          index="https://${PIVUAN_REPO%%/*}.github.io/${PIVUAN_REPO#*/}/dists/excalibur/main/binary-arm64/Packages"
+          published="$(curl -fsSL "${index}" | awk -v p="${APP}" '/^Package: /{n=$2} /^Version: /{ if (n == p) print $2 }')"
+          if grep -qxF "${version}" <<< "${published}"; then
+            echo "::error::${APP} ${version} is already published: bump its version (or the revision in apps.conf) first"
+            exit 1
+          fi
+        shell: bash
+        env:
+          APP: ${{ matrix.app }}
 
       - name: Build ${{ matrix.app }}
         run: bash .github/pivuan/apps/build-app.sh "${{ matrix.app }}" out

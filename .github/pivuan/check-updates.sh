@@ -3,7 +3,8 @@
 # Say which pinned Pivuan packages have something newer upstream. Run it before the
 # "Pivuan audio apps" and "XLibre for Pivuan" workflows; it only reports and changes nothing.
 #
-#   apps.conf     each app's commit against the head of its master branch, with the new commits
+#   apps.conf     each app's commit against the head of its master branch, with the new commits;
+#                 for an app that follows its branch, whether its VERSION is published yet
 #   xlibre.conf   each XLibre tag against the newest release tag, and the packaging commit
 #                 against the head of the packaging repository
 #
@@ -43,6 +44,24 @@ remote_head() {
 
 echo "Audio apps (${apps_conf#"${here}/"}):"
 while read -r pkg url commit ver rev; do
+	# Pivuan: an app that follows a branch ("master VERSION") is up to date once the version in
+	# that branch's VERSION file is published.
+	if [[ ! "${commit}" =~ ^[0-9a-f]{40}$ ]]; then
+		head="$(remote_head "${url}" "refs/heads/${commit}")"
+		[[ "${ver}" != VERSION ]] || ver="$(curl -fsS "https://raw.githubusercontent.com/${url#https://github.com/}/${head:-${commit}}/VERSION" 2>/dev/null | tr -d '[:space:]')"
+		published="$(curl -fsS https://rations.github.io/pivuan/dists/excalibur/main/binary-arm64/Packages 2>/dev/null |
+			awk -v p="${pkg}" '/^Package: /{n=$2} /^Version: /{ if (n == p) print $2 }')"
+		if [[ -z "${head}" || -z "${ver}" ]]; then
+			echo "  ${pkg}: could not read ${commit} or its VERSION in ${url}"
+			failed=1
+		elif grep -qxF "${ver}-pivuan${rev}" <<< "${published}"; then
+			echo "  ${pkg} ${ver}-pivuan${rev}: published (follows ${commit}, now ${head:0:7})"
+		else
+			newer=1
+			echo "  ${pkg} ${ver}-pivuan${rev}: not published yet (follows ${commit}, now ${head:0:7})"
+		fi
+		continue
+	fi
 	head="$(remote_head "${url}" refs/heads/master)"
 	if [[ -z "${head}" ]]; then
 		echo "  ${pkg}: could not read master of ${url}"
