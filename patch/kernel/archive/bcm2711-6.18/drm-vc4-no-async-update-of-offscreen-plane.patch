@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rations <ehqcar@proton.me>
+Date: Mon, 26 Oct 2026 21:45:00 +0000
+Subject: drm/vc4: plane: Don't take an async update of an offscreen plane
+
+Pivuan: on a Pi 5 at 3840x2160, SonicDE's display settings (KScreen) set
+1920x1080 and shrink the X screen afterwards. In between, the mouse
+pointer is outside the CRTC, so the cursor plane is offscreen in both the
+old and the new state. vc6_plane_mode_set() leaves such a plane with no
+dlist (dlist_count 0), and vc4_plane_duplicate_state() turns the dlist into
+ZERO_SIZE_PTR (a 0-byte kmemdup). vc4_plane_atomic_async_check() only
+compares the dlist sizes (0 == 0), so the next cursor move takes
+vc4_plane_atomic_async_update(), which reads dlist[pos0_offset] through
+ZERO_SIZE_PTR:
+
+  Unable to handle kernel NULL pointer dereference at virtual address 0000000000000014
+  pc : vc4_plane_atomic_async_update+0x1d0/0x2b0 [vc4]
+   drm_atomic_helper_async_commit+0x70/0x160 [drm_kms_helper]
+   ...
+   drm_mode_cursor2_ioctl+0x18/0x30 [drm]
+
+and Xorg is left half dead. Refuse the async path when either state has
+no dlist, so the update goes through a normal (sync) commit, which handles
+an offscreen plane. Also missing in mainline and rpi-7.2.y.
+---
+ drivers/gpu/drm/vc4/vc4_plane.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/gpu/drm/vc4/vc4_plane.c b/drivers/gpu/drm/vc4/vc4_plane.c
+index 111111111111..222222222222 100644
+--- a/drivers/gpu/drm/vc4/vc4_plane.c
++++ b/drivers/gpu/drm/vc4/vc4_plane.c
+@@ -2626,6 +2626,13 @@
+ 	if (!new_vc4_state->hw_dlist)
+ 		return -EINVAL;
+ 
++	/* An offscreen plane has no dlist (dlist_count 0, and dlist the
++	 * ZERO_SIZE_PTR of a 0-byte kmemdup), so there are no pos0, pos2
++	 * and ptr0 words to update: take a sync update instead.
++	 */
++	if (!old_vc4_state->dlist_count || !new_vc4_state->dlist_count)
++		return -EINVAL;
++
+ 	if (old_vc4_state->dlist_count != new_vc4_state->dlist_count ||
+ 	    old_vc4_state->pos0_offset != new_vc4_state->pos0_offset ||
+ 	    old_vc4_state->pos2_offset != new_vc4_state->pos2_offset ||
+-- 
+2.47.3
+
