@@ -131,7 +131,9 @@ function compile_armbian-bsp-cli() {
 	if [[ "${INIT_SYSTEM}" == "sysvinit" ]]; then
 		display_alert "Copying sysvinit bsp files" "packages/bsp/sysvinit" "info"
 		run_host_command_logged rsync -av "${SRC}"/packages/bsp/sysvinit/* "${destination}"
-		# Pivuan branding: the Pivuan logo in fastfetch, and the Pivuan name in /etc/os-release.
+		# Pivuan branding: the Pivuan logo in fastfetch and as the user's picture (it replaces
+		# common's armbian-user-icon.png, which armbian-firstlogin gives the first user), and the
+		# Pivuan name in /etc/os-release.
 		display_alert "Copying Pivuan bsp files" "packages/bsp/pivuan" "info"
 		run_host_command_logged rsync -av "${SRC}"/packages/bsp/pivuan/* "${destination}"
 		postinst_functions+=(board_side_bsp_cli_postinst_pivuan_os_release)
