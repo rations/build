@@ -14,7 +14,13 @@
 #   PIVUAN_APT_SIGNING_KEY_ID  key (fingerprint) in the current GNUPGHOME that signs the repository
 #   PIVUAN_APT_SUITE           default: excalibur
 #   PIVUAN_APT_ARCH            default: arm64
-#   PIVUAN_APT_KEEP            versions kept per package, default: 3
+#   PIVUAN_APT_KEEP            versions kept per package, default: 2
+#   PIVUAN_APT_NAME            the repository's name on its page, default: Pivuan
+#   PIVUAN_APT_DESCRIPTION     what it holds (Release and its page), default: the main repository's
+#   PIVUAN_APT_NOTE            who uses it (its page, HTML), default: Pivuan images do
+#   PIVUAN_APT_URL             its address, for the page's sources example,
+#                              default: https://rations.github.io/pivuan
+#                              (Pivuan SonicDE, rations/pivuan-sonicde, has a repository of its own)
 #   PIVUAN_APT_ACCEPT_ALL      1: publish every package in the deb-dirs, whatever its version
 # Needs: dpkg-deb, dpkg, apt-ftparchive (apt-utils), gpg, gzip, xz.
 #
@@ -25,7 +31,11 @@ revision="$2"
 shift 2
 suite="${PIVUAN_APT_SUITE:-excalibur}"
 arch="${PIVUAN_APT_ARCH:-arm64}"
-keep="${PIVUAN_APT_KEEP:-3}"
+keep="${PIVUAN_APT_KEEP:-2}"
+name="${PIVUAN_APT_NAME:-Pivuan}"
+description="${PIVUAN_APT_DESCRIPTION:-Kernel, firmware, board support, pivuan-config and audio application updates}"
+note="${PIVUAN_APT_NOTE:-Pivuan images already use it}"
+url="${PIVUAN_APT_URL:-https://rations.github.io/pivuan}"
 accept_all="${PIVUAN_APT_ACCEPT_ALL:-0}"
 key="${PIVUAN_APT_SIGNING_KEY_ID:?PIVUAN_APT_SIGNING_KEY_ID is not set}"
 # GitHub rejects files over 100 MB; stay under it.
@@ -113,7 +123,7 @@ xz -9k "${dists}/main/binary-${arch}/Packages"
 		-o APT::FTPArchive::Release::Codename="${suite}" \
 		-o APT::FTPArchive::Release::Architectures="${arch}" \
 		-o APT::FTPArchive::Release::Components=main \
-		-o APT::FTPArchive::Release::Description="Pivuan: kernel, firmware, board support, pivuan-config and audio applications for Devuan on the Raspberry Pi" \
+		-o APT::FTPArchive::Release::Description="${name}: ${description} for Devuan on the Raspberry Pi" \
 		release . > ../Release.tmp
 	mv ../Release.tmp Release
 	gpg --batch --yes --local-user "${key}" --clearsign --output InRelease Release
@@ -129,16 +139,16 @@ touch "${site}/.nojekyll"
 	cat << EOF
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pivuan apt repository</title>
+<title>${name} apt repository</title>
 <style>body{font-family:sans-serif;max-width:48rem;margin:2rem auto;padding:0 1rem;line-height:1.5}pre{background:#f3f3f3;padding:.75rem;overflow-x:auto}</style>
 </head><body>
-<h1>Pivuan apt repository</h1>
-<p>Kernel, firmware, board support, pivuan-config and audio application updates for <a href="https://github.com/rations/pivuan">Pivuan</a> (Devuan ${suite} for the Raspberry Pi, ${arch}).
-Pivuan images already use it; <code>apt update &amp;&amp; apt upgrade</code> installs the updates.</p>
+<h1>${name} apt repository</h1>
+<p>${description} for <a href="https://github.com/rations/pivuan">Pivuan</a> (Devuan ${suite} for the Raspberry Pi, ${arch}).
+${note}; <code>apt update &amp;&amp; apt upgrade</code> installs the updates.</p>
 <p>Signing key fingerprint: <code>${fingerprint}</code></p>
-<pre>/etc/apt/sources.list.d/pivuan.sources
+<pre>/etc/apt/sources.list.d/${url##*/}.sources
 Types: deb
-URIs: https://rations.github.io/pivuan
+URIs: ${url}
 Suites: ${suite}
 Components: main
 Signed-By: /usr/share/keyrings/pivuan-archive-keyring.gpg</pre>

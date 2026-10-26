@@ -20,7 +20,7 @@
 #
 # Publishing (publish=true; set it after "Pivuan kernel pin" moves the pin): the packages go to the
 # Pivuan apt repository on GitHub Pages of PIVUAN_REPO (https://rations.github.io/pivuan, branch
-# gh-pages, last 3 versions of each package) and the image becomes a GitHub Release there.
+# gh-pages, last 2 versions of each package) and the image becomes a GitHub Release there.
 # Secrets (Settings -> Secrets and variables -> Actions):
 #   PIVUAN_APT_SIGNING_KEY  armored private OpenPGP key without a passphrase that signs the repository.
 #                           Every build also puts its public half into the image (apt source + keyring);
