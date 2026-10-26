@@ -7,7 +7,9 @@
 #      systemd or systemd-sysv would be installed or apt cannot resolve it (XLibre,
 #      arm64 only, is left out; a desktop on XLibre fails if Xorg's server would come in;
 #      the Pivuan apt repository's packages for all architectures, such as the icon theme
-#      and the boot splash, come from its arm64 index, with their dependencies);
+#      and the boot splash, come from its arm64 index, with their dependencies; a desktop
+#      with an apt repository of its own (SonicDE) has its arm64-only packages looked up
+#      there, and the Devuan packages they depend on simulated instead);
 #   2. checks every package also exists for arm64 in the Devuan archive (XLibre: in the
 #      Pivuan apt repository);
 #   3. does the same for the pivuan-config package's own dependencies;
@@ -77,6 +79,45 @@ jobs:
           grep -E '^xserver-xlibre-' packages.txt > pivuan.txt || true
           sed -i -E '/^xserver-xlibre-/d' packages.txt
           echo "From the Pivuan apt repository: $(tr '\n' ' ' < pivuan.txt)"
+          # A desktop's own apt repository (repo: in its YAML; SonicDE, arm64 only): its packages
+          # are looked up in its arm64 index (arm64 step), and the Devuan packages they depend on
+          # (the first of each set of alternatives) go into the simulation instead.
+          : > desktop-repo.txt
+          : > desktop-deps.txt
+          if [ -n "${DESKTOP_REPO_URL:-}" ]; then
+            curl -fsSL "${DESKTOP_REPO_URL}/dists/${DESKTOP_REPO_SUITE_0}/main/binary-arm64/Packages" > desktop-Packages
+            python3 - packages.txt desktop-Packages desktop-repo.txt desktop-deps.txt <<'PY'
+          import re, sys
+          wanted, index, repo_out, deps_out = sys.argv[1:]
+          stanzas = {}
+          for block in open(index).read().split("\n\n"):
+              fields = dict(re.findall(r"^([A-Za-z-]+): (.*)$", block, re.M))
+              if "Package" in fields:
+                  stanzas[fields["Package"]] = fields
+          todo = [p for p in open(wanted).read().split() if p in stanzas]
+          repo, deps = set(), set()
+          while todo:
+              p = todo.pop()
+              if p in repo:
+                  continue
+              repo.add(p)
+              for group in stanzas[p].get("Depends", "").split(","):
+                  names = [re.sub(r"[ (].*", "", a.strip()) for a in group.split("|") if a.strip()]
+                  if not names:
+                      continue
+                  if names[0] in stanzas:
+                      todo.append(names[0])
+                  else:
+                      deps.add(names[0])
+          wanted_set = set(open(wanted).read().split())
+          open(repo_out, "w").write("".join(f"{p}\n" for p in sorted(repo & wanted_set)))
+          open(deps_out, "w").write("".join(f"{d}\n" for d in sorted(deps)))
+          PY
+            grep -vxF -f desktop-repo.txt packages.txt > packages.tmp || true
+            mv packages.tmp packages.txt
+            echo "From ${DESKTOP_REPO_URL}: $(tr '\n' ' ' < desktop-repo.txt)"
+            echo "Their Devuan dependencies: $(wc -l < desktop-deps.txt)"
+          fi
           # Browser from Brave's apt repository (module_desktops _module_desktops_install_brave)
           echo "${DESKTOP_BRAVE_PKG:-}" | grep -v '^$' > brave.txt || true
           echo "Brave package: $(cat brave.txt)"
@@ -115,7 +156,7 @@ jobs:
         run: |
           set -eu
           fail=0
-          for list in packages.txt config-deps.txt brave.txt; do
+          for list in packages.txt desktop-deps.txt config-deps.txt brave.txt; do
             [ -s "$list" ] || continue
             echo "::group::apt-get -s install $(wc -l < "$list") packages from $list"
             mapfile -t pkgs < "$list"
@@ -144,6 +185,7 @@ jobs:
             echo "- Desktop packages requested: $(wc -l < packages.txt), new packages installed: $(wc -l < inst-packages.txt)"
             echo "- pivuan-config dependencies: $(wc -l < config-deps.txt), new packages installed: $(wc -l < inst-config-deps.txt)"
             [ -s brave.txt ] && echo "- Browser $(cat brave.txt) from Brave's repository, new packages installed: $(wc -l < inst-brave.txt)"
+            [ -s desktop-deps.txt ] && echo "- Devuan packages the desktop's own repository needs: $(wc -l < desktop-deps.txt), new packages installed: $(wc -l < inst-desktop-deps.txt)"
             echo "- systemd pulled in: $(cat inst-*.txt | grep -cxE 'systemd|systemd-sysv' | awk '{print ($1 ? "YES" : "no")}')"
           } >> "$GITHUB_STEP_SUMMARY"
           exit $fail
@@ -155,11 +197,20 @@ jobs:
           dpkg --add-architecture arm64
           apt-get update -q
           missing=""
-          mapfile -t all < <(sort -u packages.txt config-deps.txt brave.txt)
+          mapfile -t all < <(sort -u packages.txt desktop-deps.txt config-deps.txt brave.txt)
           for p in "${all[@]}"; do
-            # Architecture: all packages are listed under the native arch as well
-            apt-cache show "$p:arm64" > /dev/null 2>&1 || apt-cache show "$p" 2>/dev/null | grep -q '^Architecture: all' || missing="$missing $p"
+            # Architecture: all packages are listed under the native arch as well; a virtual
+            # package (default-logind) counts when an arm64 package provides it
+            apt-cache show "$p:arm64" > /dev/null 2>&1 || apt-cache show "$p" 2>/dev/null | grep -q '^Architecture: all' \
+              || apt-cache showpkg "$p:arm64" 2>/dev/null | sed -n '/^Reverse Provides:/,$p' | tail -n +2 | grep -q . \
+              || missing="$missing $p"
           done
+          # The desktop's own repository: in its arm64 index
+          if [ -s desktop-repo.txt ]; then
+            while read -r p; do
+              grep -qx "Package: $p" desktop-Packages || missing="$missing $p"
+            done < desktop-repo.txt
+          fi
           # XLibre: in the Pivuan apt repository's arm64 index
           if [ -s pivuan.txt ]; then
             curl -fsSL https://rations.github.io/pivuan/dists/excalibur/main/binary-arm64/Packages > pivuan-Packages
