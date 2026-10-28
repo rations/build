@@ -245,7 +245,6 @@ function compile_armbian-bsp-cli() {
 	declare -a bsp_conffile_candidates=(
 		"/usr/lib/armbian/armbian-apt-updates"
 		"/etc/X11/xorg.conf.d/01-armbian-defaults.conf"
-		"/etc/apt/apt.conf.d/02-armbian-periodic"
 	)
 	declare bsp_conffile
 	: > "${destination}"/DEBIAN/conffiles
@@ -452,6 +451,24 @@ function board_side_bsp_cli_preinst() {
 	[[ -f "/etc/update-motd.d/80-livepatch" ]] && rm /etc/update-motd.d/80-livepatch
 	[[ -f "/etc/apt/apt.conf.d/02compress-indexes" ]] && rm /etc/apt/apt.conf.d/02compress-indexes
 	[[ -f "/etc/apt/apt.conf.d/02periodic" ]] && rm /etc/apt/apt.conf.d/02periodic
+	# automatic-update policy now lives only in armbian-config. Migrate systems off
+	# the BSP's periodic config, once: only while 02-armbian-periodic is still present.
+	# It set APT::Periodic::Enable "0", the master off-switch; with it gone,
+	# apt.systemd.daily defaults Enable to 1. So read the effective value BEFORE
+	# removing it (apt-config reads merged config, so a commented setting cannot count),
+	# then drop the stock unattended-upgrades trigger unless updates are enabled.
+	# armbian-config writes APT::Periodic::Enable "1" when a user opts in, so that case
+	# is preserved. Gating on the file means a later dpkg-reconfigure is left untouched.
+	if [[ -f "/etc/apt/apt.conf.d/02-armbian-periodic" ]]; then
+		if [[ "$(apt-config dump --format '%v%n' APT::Periodic::Enable 2>/dev/null)" != "1" ]]; then
+			# clear the debconf answer too, so a later unattended-upgrades postinst
+			# cannot recreate 20auto-upgrades with updates on
+			command -v debconf-set-selections >/dev/null 2>&1 && \
+				echo "unattended-upgrades unattended-upgrades/enable_auto_updates boolean false" | debconf-set-selections
+			rm -f /etc/apt/apt.conf.d/20auto-upgrades
+		fi
+		rm /etc/apt/apt.conf.d/02-armbian-periodic
+	fi
 	[[ -f "/etc/apt/apt.conf.d/no-languages" ]] && rm /etc/apt/apt.conf.d/no-languages
 	[[ -f "/etc/init.d/armhwinfo" ]] && rm /etc/init.d/armhwinfo
 	[[ -f "/etc/logrotate.d/armhwinfo" ]] && rm /etc/logrotate.d/armhwinfo
@@ -550,6 +567,22 @@ function board_side_bsp_cli_postinst_finish() {
 	fi
 	if [[ ! -f "/etc/default/armbian-firstrun" ]]; then
 		mv /etc/default/armbian-firstrun.dpkg-dist /etc/default/armbian-firstrun
+	fi
+	# Groups that every new normal user joins: hardware and desktop access.
+	# armbian-firstlogin adds the first user to these and to the admin groups.
+	armbian_user_groups="audio video plugdev input dialout netdev bluetooth render users games i2c gpio spi"
+	# Create missing groups. This changes no user. udev rules use i2c, gpio and spi.
+	for group in ${armbian_user_groups} docker; do
+		getent group "${group}" > /dev/null || groupadd --system "${group}" || echo "Warning: Failed to create group ${group}" >&2
+	done
+	# First install only (also the image build): adduser adds new normal users to these groups.
+	# Not GROUPS= in /etc/default/useradd: useradd also applies it to system accounts.
+	# Upgrades keep the local defaults and the groups of existing users.
+	if [[ -z "$2" ]]; then
+		if [[ -f /etc/adduser.conf ]]; then
+			sed -i -e '/^#\?ADD_EXTRA_GROUPS=/d' -e '/^#\?EXTRA_GROUPS=/d' /etc/adduser.conf
+			printf 'ADD_EXTRA_GROUPS=1\nEXTRA_GROUPS="%s"\n' "${armbian_user_groups}" >> /etc/adduser.conf
+		fi
 	fi
 
 	# Reload services

@@ -41,6 +41,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rockchip-rk3399-i2c8.dtbo \
 	rockchip-rk3399-opp-2ghz.dtbo \
 	rockchip-rk3399-pcie-gen2.dtbo \
+	rockchip-rk3399-rock-pi-4-spdif.dtbo \
 	rockchip-rk3399-spi-jedec-nor.dtbo \
 	rockchip-rk3399-spi-spidev.dtbo \
 	rockchip-rk3399-uart4.dtbo \
@@ -48,6 +49,8 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3562-kickpi-k3b-demo-dsi-panel.dtbo \
 	rockchip-rk3566-sata2.dtbo \
 	rockchip-rk3566-i2c2-m1.dtbo \
+	rockchip-rk3566-eltay-rm66-pdm.dtbo \
+	rockchip-rk3566-eltay-rm66-pocketterm35-touch-5d.dtbo \
 	rockchip-rk3566-i2c3-m0.dtbo \
 	rockchip-rk3566-i2c4-m0.dtbo \
 	rockchip-rk3566-pwm7.dtbo \
@@ -57,6 +60,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rockchip-rk3566-uart3-m0.dtbo \
 	rockchip-rk3566-uart7-m2.dtbo \
 	rockchip-rk3566-uart9-m2.dtbo \
+	rockchip-rk3568-dshanpi-r1-disable-pcie.dtbo \
 	rockchip-rk3568-nanopi-r5c-leds.dtbo \
 	rockchip-rk3568-nanopi-r5s-leds.dtbo \
 	rockchip-rk3568-hk-i2c0.dtbo \
