@@ -6,8 +6,9 @@
 # (6.18.53 -> 6.18.54 ...). Run by hand, this job reads the kernel version at the branch head; when
 # it is newer than the pinned one it moves the pin to that commit and pushes it to the default
 # branch. Then pull it, build and push the kernel on a PC (.github/pivuan/kernel-build.sh --push:
-# the image build does not compile kernels), and start "Pivuan image build" with publish=true
-# (new image release + apt repository update).
+# the image build does not compile kernels), and start "Pivuan image build" with publish
+# "packages" (apt repository update: running systems get the kernel with apt upgrade) or
+# "packages and release" (also a new image release).
 # Commits between point releases (Pi-specific changes) do not move the pin.
 
 name: Pivuan kernel pin
