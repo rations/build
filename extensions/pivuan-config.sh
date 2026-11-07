@@ -3,6 +3,9 @@
 function extension_prepare_config__pivuan_config() {
 	declare -g PIVUAN_CONFIG_REPO="${PIVUAN_CONFIG_REPO:-https://github.com/rations/configng.git}"
 	declare -g PIVUAN_CONFIG_BRANCH="${PIVUAN_CONFIG_BRANCH:-pivuan}"
+	# No tuning profile: armbian-firstrun applies it with armbian-config, and pivuan-config
+	# refuses profiles on Devuan (their CPU bias is a systemd unit). CPU frequency works.
+	declare -g TUNING_PROFILE="${TUNING_PROFILE:-none}"
 	display_alert "Extension: ${EXTENSION}: pivuan-config source" "${PIVUAN_CONFIG_REPO} ${PIVUAN_CONFIG_BRANCH}" "info"
 }
 
