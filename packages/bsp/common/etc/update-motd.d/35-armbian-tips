@@ -35,7 +35,7 @@ if [[ -n "${VENDOR:-}" && "${VENDOR}" != Armbian* ]]; then
     lines+=("To install Pivuan Audio run pivuan-config --cmd AUDI01")
     lines+=("To install XFCE desktop run pivuan-config --cmd XFCE01")
     lines+=("To install MATE desktop run pivuan-config --cmd MATE01")
-    lines+=("To install SonicDE desktop run pivuan-config --cmd SONI01")
+    lines+=("To install SonicDE run pivuan-config --cmd SONI01")
   fi
 else
   # Featured feed (https://github.armbian.com/featured.json), cached daily by
